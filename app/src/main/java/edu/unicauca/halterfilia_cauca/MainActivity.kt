@@ -9,7 +9,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 
 import edu.unicauca.halterfilia_cauca.ui.features.login.LoginScreen // Importa tu pantalla
-import edu.unicauca.halterfilia_cauca.ui.navigation.AppNavigation
+import edu.unicauca.halterfilia_cauca.ui.navigation.Navigation
 import edu.unicauca.halterfilia_cauca.ui.navigation.AppScreens
 import edu.unicauca.halterfilia_cauca.ui.theme.HalterofiliaCaucaTheme // Import tu tema
 
@@ -22,7 +22,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    AppNavigation() // Aquí llamas a tu pantalla
+                    Navigation() // Aquí llamas a tu pantalla
                 }
             }
         }

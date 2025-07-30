@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.google.firebase.auth.FirebaseAuth
 import edu.unicauca.halterfilia_cauca.ui.features.athlete.AthletesScreen
 import edu.unicauca.halterfilia_cauca.ui.features.athlete_registration.AthleteRegistrationScreen
 import edu.unicauca.halterfilia_cauca.ui.features.bluetooth_connection.BluetoothScreen
@@ -13,29 +14,36 @@ import edu.unicauca.halterfilia_cauca.ui.features.measurement.MedidasScreen
 import edu.unicauca.halterfilia_cauca.ui.features.register.RegisterScreen
 
 @Composable
-fun AppNavigation(){
+fun Navigation() {
     val navController = rememberNavController()
-    NavHost(navController = navController, startDestination = AppScreens.LoginScreen.route ){
-        composable(AppScreens.LoginScreen.route){
-            LoginScreen(navController)
+    val auth = FirebaseAuth.getInstance()
+    val startDestination = if (auth.currentUser != null) {
+        AppScreens.AthleteScreen.route
+    } else {
+        AppScreens.LoginScreen.route
+    }
+
+    NavHost(navController = navController, startDestination = startDestination) {
+        composable(route = AppScreens.LoginScreen.route) {
+            LoginScreen(navController = navController)
         }
-        composable(AppScreens.RegisterScreen.route){
-            RegisterScreen(navController)
+        composable(route = AppScreens.RegisterScreen.route) {
+            RegisterScreen(navController = navController)
         }
-        composable(AppScreens.AthleteScreen.route){
-            AthletesScreen(navController)
+        composable(route = AppScreens.AthleteScreen.route) {
+            AthletesScreen(navController = navController)
         }
-        composable(AppScreens.AthleteRegistrationScreen.route){
-            AthleteRegistrationScreen(navController)
+        composable(route = AppScreens.AthleteRegistrationScreen.route){
+            AthleteRegistrationScreen(navController = navController)
         }
-        composable(AppScreens.BluetoothScreen.route){
-            BluetoothScreen(navController)
+        composable(route = AppScreens.BluetoothScreen.route){
+            BluetoothScreen(navController = navController)
         }
-        composable(AppScreens.HistoryScreen.route){
-            HistoryScreen(navController)
+        composable(route = AppScreens.HistoryScreen.route){
+            HistoryScreen(navController = navController)
         }
-        composable(AppScreens.MedidasScreen.route){
-            MedidasScreen(navController)
+        composable(route = AppScreens.MedidasScreen.route) {
+            MedidasScreen(navController = navController)
         }
     }
 }

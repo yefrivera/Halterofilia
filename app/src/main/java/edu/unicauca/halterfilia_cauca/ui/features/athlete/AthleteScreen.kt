@@ -10,11 +10,10 @@ import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -25,6 +24,14 @@ import edu.unicauca.halterfilia_cauca.ui.theme.HalterofiliaCaucaTheme
 
 import androidx.navigation.NavController
 import edu.unicauca.halterfilia_cauca.ui.navigation.AppScreens
+
+// 1. Define las acciones posibles en el menú para un manejo más limpio
+enum class AthleteMenuAction {
+    CONSULT,
+    MEASURE,
+    HISTORY,
+    DELETE
+}
 
 /**
  * Composable "Inteligente" (Stateful)
@@ -37,24 +44,28 @@ fun AthletesScreen(
     AthletesContent(
         athletes = athletesViewModel.athletes.value,
         onAddAthleteClicked = {
-            // Navegar a la pantalla de registro de atleta
             navController.navigate(AppScreens.AthleteRegistrationScreen.route)
         },
         onConnectBluetoothClicked = {
-            // Navegar a la pantalla de conexión Bluetooth
             navController.navigate(AppScreens.BluetoothScreen.route)
         },
         onLogoutClicked = {
-            // Navegar a la pantalla de login y limpiar el backstack
             navController.navigate(AppScreens.LoginScreen.route) {
                 popUpTo(navController.graph.startDestinationId) {
                     inclusive = true
                 }
             }
         },
-        onAthleteOptionsClicked = {
-            // Ejemplo: Navegar a la pantalla de historial del atleta
-            navController.navigate(AppScreens.HistoryScreen.route)
+        // 2. Maneja la acción seleccionada del menú
+        onAthleteOptionSelected = { athlete, action ->
+            // Aquí defines qué hacer para cada opción del menú
+            // Puedes pasar el ID del deportista como argumento en la ruta
+            when (action) {
+                AthleteMenuAction.CONSULT -> { /* TODO: navController.navigate("consult_screen/${athlete.id}") */ }
+                AthleteMenuAction.MEASURE -> navController.navigate(AppScreens.MedidasScreen.route)
+                AthleteMenuAction.HISTORY -> navController.navigate(AppScreens.HistoryScreen.route)
+                AthleteMenuAction.DELETE -> { /* TODO: Mostrar diálogo de confirmación y luego llamar al ViewModel */ }
+            }
         }
     )
 }
@@ -68,14 +79,15 @@ fun AthletesContent(
     onAddAthleteClicked: () -> Unit,
     onConnectBluetoothClicked: () -> Unit,
     onLogoutClicked: () -> Unit,
-    onAthleteOptionsClicked: (Athlete) -> Unit
+    // 3. Se actualiza la firma para pasar la acción seleccionada
+    onAthleteOptionSelected: (Athlete, AthleteMenuAction) -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        // 1. Cabecera con título y botón de salir
+        // Cabecera con título y botón de salir
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -89,14 +101,16 @@ fun AthletesContent(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // 2. Lista de deportistas (scrollable)
+        // Lista de deportistas (scrollable)
         LazyColumn(
-            modifier = Modifier.weight(1f) // Ocupa todo el espacio disponible
+            modifier = Modifier.weight(1f)
         ) {
             items(athletes) { athlete ->
                 AthleteItem(
                     athlete = athlete,
-                    onOptionsClicked = { onAthleteOptionsClicked(athlete) }
+                    onOptionSelected = { action ->
+                        onAthleteOptionSelected(athlete, action)
+                    }
                 )
                 HorizontalDivider()
             }
@@ -104,26 +118,20 @@ fun AthletesContent(
 
         Spacer(modifier = Modifier.height(44.dp))
 
-        // 3. Botones inferiores
+        // Botones inferiores
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
                 .fillMaxWidth()
                 .offset(y = (-30).dp)
-            ) {
-            Button(
-                onClick = onAddAthleteClicked,
-                modifier = Modifier.fillMaxWidth()
-            ) {
+        ) {
+            Button(onClick = onAddAthleteClicked, modifier = Modifier.fillMaxWidth()) {
                 Icon(imageVector = Icons.Default.Add, contentDescription = "Agregar")
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(text = "Agregar deportista", fontSize = 16.sp)
             }
             Spacer(modifier = Modifier.height(8.dp))
-            Button(
-                onClick = onConnectBluetoothClicked,
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            Button(onClick = onConnectBluetoothClicked, modifier = Modifier.fillMaxWidth()) {
                 Text(text = "Conectar dispositivo Bluetooth", fontSize = 16.sp)
             }
         }
@@ -136,7 +144,8 @@ fun AthletesContent(
 @Composable
 fun AthleteItem(
     athlete: Athlete,
-    onOptionsClicked: () -> Unit
+    // 4. Se cambia el callback para que informe qué acción se seleccionó
+    onOptionSelected: (AthleteMenuAction) -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -147,21 +156,62 @@ fun AthleteItem(
         Icon(
             imageVector = Icons.Default.Person,
             contentDescription = "Icono de deportista",
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
+            modifier = Modifier.size(40.dp).clip(CircleShape)
         )
         Spacer(modifier = Modifier.width(16.dp))
         Text(
             text = athlete.name,
-            modifier = Modifier.weight(1f), // Empuja el siguiente icono a la derecha
+            modifier = Modifier.weight(1f),
             fontSize = 18.sp
         )
-        IconButton(onClick =onOptionsClicked) {
-            Icon(imageVector = Icons.Default.MoreVert, contentDescription = "Opciones")
+
+        // 5. Lógica del menú desplegable
+        var expanded by remember { mutableStateOf(false) }
+
+        Box {
+            // Este botón abre el menú
+            IconButton(onClick = { expanded = true }) {
+                Icon(imageVector = Icons.Default.MoreVert, contentDescription = "Opciones")
+            }
+
+            // Aquí se define el menú
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Consultar datos") },
+                    onClick = {
+                        onOptionSelected(AthleteMenuAction.CONSULT)
+                        expanded = false
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Tomar medidas") },
+                    onClick = {
+                        onOptionSelected(AthleteMenuAction.MEASURE)
+                        expanded = false
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Ver historial") },
+                    onClick = {
+                        onOptionSelected(AthleteMenuAction.HISTORY)
+                        expanded = false
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Eliminar deportista") },
+                    onClick = {
+                        onOptionSelected(AthleteMenuAction.DELETE)
+                        expanded = false
+                    }
+                )
+            }
         }
     }
 }
+
 
 /**
  * Previsualización de la pantalla
@@ -179,7 +229,8 @@ fun AthletesScreenPreview() {
             onAddAthleteClicked = {},
             onConnectBluetoothClicked = {},
             onLogoutClicked = {},
-            onAthleteOptionsClicked = {}
+            // Se actualiza la preview para que no de error
+            onAthleteOptionSelected = { _, _ -> }
         )
     }
 }

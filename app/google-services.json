@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1062469759263",
+    "project_id": "halterofilia-cauca",
+    "storage_bucket": "halterofilia-cauca.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1062469759263:android:b66fa7ce22e06060a7002a",
+        "android_client_info": {
+          "package_name": "edu.unicauca.halterfilia_cauca"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCtTrHlNfGGOjfTcaD8hT38mqCWmgIoccU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
