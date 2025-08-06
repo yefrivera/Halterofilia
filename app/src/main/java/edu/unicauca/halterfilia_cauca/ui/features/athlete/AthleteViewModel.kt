@@ -1,31 +1,153 @@
 package edu.unicauca.halterfilia_cauca.ui.features.athlete
 
-import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import edu.unicauca.halterfilia_cauca.domain.model.Athlete
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
-// 1. Modelo de datos para representar a un deportista
-data class Athlete(
-    val id: Int,
-    val name: String
-)
+// Define los estados para la UI
+sealed interface AthleteUiState {
+    object Loading : AthleteUiState
+    data class Success(
+        val athletes: List<Athlete>,
+        val selectedAthlete: Athlete? = null,
+        val showConsultDialog: Boolean = false,
+        val showDeleteConfirmation: Boolean = false,
+        val showLogoutConfirmation: Boolean = false
+    ) : AthleteUiState
+    object Empty : AthleteUiState
+    data class Error(val message: String) : AthleteUiState
+}
 
-// 2. ViewModel para manejar la lógica y el estado de la pantalla
-class AthletesViewModel : ViewModel() {
+class AthleteViewModel : ViewModel() {
 
-    // Estado que contiene la lista de deportistas.
-    // Usamos datos de ejemplo para el diseño.
-    val athletes = mutableStateOf(
-        listOf(
-            Athlete(id = 1, name = "Deportista 1"),
-            Athlete(id = 2, name = "Deportista 2"),
-            Athlete(id = 3, name = "Deportista 3"),
-            Athlete(id = 4, name = "Deportista 4"),
-        )
-    )
+    private val auth: FirebaseAuth = FirebaseAuth.getInstance()
+    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
 
-    // Funciones para los eventos de la UI (por ahora vacías)
-    fun onAddAthleteClicked() { /* TODO: Lógica para agregar */ }
-    fun onConnectBluetoothClicked() { /* TODO: Lógica para conectar BT */ }
-    fun onLogoutClicked() { /* TODO: Lógica para cerrar sesión */ }
-    fun onAthleteOptionsClicked(athlete: Athlete) { /* TODO: Lógica para mostrar opciones */ }
+    private val _uiState = MutableStateFlow<AthleteUiState>(AthleteUiState.Loading)
+    val uiState = _uiState.asStateFlow()
+
+    init {
+        fetchAthletes()
+    }
+
+    private fun fetchAthletes() {
+        val userId = auth.currentUser?.uid
+        if (userId == null) {
+            _uiState.value = AthleteUiState.Error("Usuario no autenticado.")
+            return
+        }
+
+        firestore.collection("users").document(userId).collection("athletes")
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) {
+                    _uiState.value = AthleteUiState.Error(e.message ?: "Error al cargar los deportistas.")
+                    return@addSnapshotListener
+                }
+
+                if (snapshot != null) {
+                    val athletesList = snapshot.documents.mapNotNull { doc ->
+                        doc.toObject(Athlete::class.java)?.copy(id = doc.id)
+                    }
+                    if (athletesList.isEmpty()) {
+                        _uiState.value = AthleteUiState.Empty
+                    } else {
+                        _uiState.value = AthleteUiState.Success(athletesList)
+                    }
+                } else {
+                    _uiState.value = AthleteUiState.Empty
+                }
+            }
+    }
+
+    fun onConsultAthleteClicked(athlete: Athlete) {
+        _uiState.update {
+            (it as? AthleteUiState.Success)?.copy(selectedAthlete = athlete, showConsultDialog = true) ?: it
+        }
+    }
+
+    fun onUpdateAthlete(athlete: Athlete) {
+        viewModelScope.launch {
+            val userId = auth.currentUser?.uid
+            if (userId == null || athlete.id == null) {
+                // Handle error
+                return@launch
+            }
+            try {
+                firestore.collection("users").document(userId).collection("athletes")
+                    .document(athlete.id)
+                    .set(athlete)
+                    .await()
+                dismissConsultDialog()
+            } catch (e: Exception) {
+                // Handle error
+            }
+        }
+    }
+
+    fun onDeleteAthleteClicked(athlete: Athlete) {
+        _uiState.update {
+            (it as? AthleteUiState.Success)?.copy(selectedAthlete = athlete, showDeleteConfirmation = true) ?: it
+        }
+    }
+
+    fun confirmAthleteDeletion() {
+        viewModelScope.launch {
+            val userId = auth.currentUser?.uid
+            val athleteToDelete = (_uiState.value as? AthleteUiState.Success)?.selectedAthlete
+
+            if (userId == null || athleteToDelete?.id == null) {
+                // Handle error
+                return@launch
+            }
+
+            try {
+                firestore.collection("users").document(userId).collection("athletes")
+                    .document(athleteToDelete.id)
+                    .delete()
+                    .await()
+                dismissDeleteConfirmation()
+            } catch (e: Exception) {
+                // Handle error
+            }
+        }
+    }
+
+    fun onLogoutClicked() {
+        _uiState.update {
+            (it as? AthleteUiState.Success)?.copy(showLogoutConfirmation = true)
+                ?: (it as? AthleteUiState.Empty)?.let { AthleteUiState.Success(emptyList(), showLogoutConfirmation = true) }
+                ?: it
+        }
+    }
+
+    fun confirmLogout(onLoggedOut: () -> Unit) {
+        auth.signOut()
+        onLoggedOut()
+        dismissLogoutConfirmation()
+    }
+
+    fun dismissConsultDialog() {
+        _uiState.update {
+            (it as? AthleteUiState.Success)?.copy(selectedAthlete = null, showConsultDialog = false) ?: it
+        }
+    }
+
+    fun dismissDeleteConfirmation() {
+        _uiState.update {
+            (it as? AthleteUiState.Success)?.copy(selectedAthlete = null, showDeleteConfirmation = false) ?: it
+        }
+    }
+
+    fun dismissLogoutConfirmation() {
+        _uiState.update {
+            (it as? AthleteUiState.Success)?.copy(showLogoutConfirmation = false) ?: it
+        }
+    }
 }

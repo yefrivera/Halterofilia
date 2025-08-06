@@ -1,28 +1,80 @@
 package edu.unicauca.halterfilia_cauca.ui.features.bluetooth_connection
 
-import androidx.compose.runtime.mutableStateOf
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import android.util.Log
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import edu.unicauca.halterfilia_cauca.core.bluetooth.BluetoothController
+import edu.unicauca.halterfilia_cauca.domain.model.BluetoothDeviceDomain
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 
-// 1. Modelo de datos para un dispositivo Bluetooth
-data class BluetoothDeviceModel(
-    val name: String,
-    val address: String // La dirección MAC es útil en una app real
+data class BluetoothUiState(
+    val scannedDevices: List<BluetoothDeviceDomain> = emptyList(),
+    val connectedDevice: BluetoothDeviceDomain? = null,
+    val isScanning: Boolean = false
 )
 
-// 2. ViewModel para manejar el estado
-class ConnectDeviceViewModel : ViewModel() {
+class BluetoothViewModel(
+    app: Application
+) : AndroidViewModel(app) {
 
-    // Lista de ejemplo de dispositivos encontrados
-    val availableDevices = mutableStateOf(
-        listOf(
-            BluetoothDeviceModel(name = "Dispositivo 1", address = "00:11:22:AA:BB:CC"),
-            BluetoothDeviceModel(name = "Dispositivo 2", address = "DD:EE:FF:33:44:55"),
-            BluetoothDeviceModel(name = "Dispositivo 3", address = "GG:HH:II:66:77:88")
+    private val bluetoothController by lazy {
+        BluetoothController(app)
+    }
+
+    private val _state = MutableStateFlow(BluetoothUiState())
+    val state = combine(
+        bluetoothController.scannedDevices,
+        bluetoothController.connectedDevices,
+        bluetoothController.isScanning,
+        _state
+    ) { scannedDevices, connectedDevices, isScanning, state ->
+        // Find the first connected device
+        val connectedDevice = connectedDevices.values.firstOrNull()
+
+        // Update scanned devices with their connection status
+        val updatedScannedDevices = scannedDevices.map { scannedDevice ->
+            val isConnected = connectedDevices.containsKey(scannedDevice.address)
+            scannedDevice.copy(isConnected = isConnected)
+        }
+
+        state.copy(
+            scannedDevices = updatedScannedDevices,
+            connectedDevice = connectedDevice,
+            isScanning = isScanning
         )
-    )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), _state.value)
 
-    // Acciones del usuario (la lógica se implementaría después)
-    fun onDeviceSelected(device: BluetoothDeviceModel) {
-        // TODO: Lógica para intentar conectar al dispositivo
+    fun startScan() {
+        Log.d("BluetoothViewModel", "Start Scan called")
+        bluetoothController.startScan()
+    }
+
+    fun stopScan() {
+        Log.d("BluetoothViewModel", "Stop Scan called")
+        bluetoothController.stopScan()
+    }
+
+    fun connectToDevice(device: BluetoothDeviceDomain) {
+        // Allow connecting only if there is no device connected
+        if (state.value.connectedDevice == null) {
+            Log.d("BluetoothViewModel", "Connecting to device: ${device.address}")
+            bluetoothController.connectToDevice(device.address)
+        } else {
+            Log.d("BluetoothViewModel", "Cannot connect, a device is already connected.")
+        }
+    }
+
+    fun disconnectDevice(device: BluetoothDeviceDomain) {
+        Log.d("BluetoothViewModel", "Disconnecting from device: ${device.address}")
+        bluetoothController.disconnectDevice(device.address)
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        bluetoothController.release()
     }
 }

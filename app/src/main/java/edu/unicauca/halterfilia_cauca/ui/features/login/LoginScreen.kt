@@ -8,63 +8,67 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
-import androidx.navigation.compose.rememberNavController
 import edu.unicauca.halterfilia_cauca.R
 import edu.unicauca.halterfilia_cauca.ui.navigation.AppScreens
-import edu.unicauca.halterfilia_cauca.ui.theme.HalterofiliaCaucaTheme
 
 @Composable
 fun LoginScreen(navController: NavController, loginViewModel: LoginViewModel = viewModel()) {
     val uiState by loginViewModel.uiState.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     // Efecto para navegar cuando el inicio de sesión sea exitoso
     LaunchedEffect(uiState.isLoginSuccess) {
         if (uiState.isLoginSuccess) {
+            snackbarHostState.showSnackbar("Inicio de sesión exitoso")
             navController.navigate(AppScreens.AthleteScreen.route) {
-                // Limpia el backstack para que el usuario no pueda volver a la pantalla de login
                 popUpTo(AppScreens.LoginScreen.route) { inclusive = true }
             }
-        }
-    }
-
-    // Efecto para mostrar mensajes (Snackbar, Toast, etc.)
-    uiState.errorMessage?.let { message ->
-        LaunchedEffect(message) {
-            // Aquí puedes mostrar un Snackbar o un Toast
-            // Por simplicidad, lo dejaremos como un comentario.
-            // scaffoldState.snackbarHostState.showSnackbar(message)
             loginViewModel.onLoginEvent(LoginEvent.MessageShown)
         }
     }
 
-    LoginContent(
-        uiState = uiState,
-        onEvent = loginViewModel::onLoginEvent,
-        onRegisterClicked = {
-            navController.navigate(AppScreens.RegisterScreen.route)
+    // Efecto para mostrar mensajes de error
+    LaunchedEffect(uiState.errorMessage) {
+        uiState.errorMessage?.let { message ->
+            snackbarHostState.showSnackbar(message)
+            loginViewModel.onLoginEvent(LoginEvent.MessageShown)
         }
-    )
+    }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) }
+    ) { paddingValues ->
+        LoginContent(
+            uiState = uiState,
+            onEvent = loginViewModel::onLoginEvent,
+            onRegisterClicked = {
+                navController.navigate(AppScreens.RegisterScreen.route)
+            },
+            modifier = Modifier.padding(paddingValues)
+        )
+    }
 }
 
 @Composable
 fun LoginContent(
     uiState: LoginState,
     onEvent: (LoginEvent) -> Unit,
-    onRegisterClicked: () -> Unit
+    onRegisterClicked: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Box(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -98,7 +102,7 @@ fun LoginContent(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                isError = uiState.errorMessage?.contains("correo") == true
+                isError = uiState.errorMessage != null
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -111,18 +115,8 @@ fun LoginContent(
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                isError = uiState.errorMessage?.contains("contraseña") == true
+                isError = uiState.errorMessage != null
             )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            uiState.errorMessage?.let {
-                Text(
-                    text = it,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(start = 8.dp)
-                )
-            }
 
             Spacer(modifier = Modifier.height(24.dp))
 
@@ -154,17 +148,5 @@ fun LoginContent(
         if (uiState.isLoading) {
             CircularProgressIndicator()
         }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun LoginScreenPreview() {
-    HalterofiliaCaucaTheme {
-        LoginContent(
-            uiState = LoginState(email = "correo@ejemplo.com", password = "password123"),
-            onEvent = {},
-            onRegisterClicked = {}
-        )
     }
 }

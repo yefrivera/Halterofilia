@@ -10,7 +10,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import edu.unicauca.halterfilia_cauca.ui.navigation.AppScreens
-import kotlinx.coroutines.launch
 
 @Composable
 fun RegisterScreen(
@@ -19,31 +18,21 @@ fun RegisterScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
 
     LaunchedEffect(key1 = uiState.isRegistrationSuccess) {
         if (uiState.isRegistrationSuccess) {
+            snackbarHostState.showSnackbar("Registro exitoso")
             navController.navigate(AppScreens.AthleteScreen.route) {
                 popUpTo(AppScreens.LoginScreen.route) { inclusive = true }
             }
+            viewModel.onRegisterEvent(RegisterEvent.MessageShown)
         }
     }
 
     LaunchedEffect(key1 = uiState.errorMessage) {
         uiState.errorMessage?.let {
-            scope.launch {
-                snackbarHostState.showSnackbar(it)
-                viewModel.onRegisterEvent(RegisterEvent.MessageShown)
-            }
-        }
-    }
-
-    LaunchedEffect(key1 = uiState.successMessage) {
-        uiState.successMessage?.let {
-            scope.launch {
-                snackbarHostState.showSnackbar(it)
-                viewModel.onRegisterEvent(RegisterEvent.MessageShown)
-            }
+            snackbarHostState.showSnackbar(it)
+            viewModel.onRegisterEvent(RegisterEvent.MessageShown)
         }
     }
 
@@ -69,7 +58,7 @@ fun RegisterScreen(
                     onValueChange = { viewModel.onRegisterEvent(RegisterEvent.EmailChanged(it)) },
                     label = { Text("Correo Electrónico") },
                     modifier = Modifier.fillMaxWidth(),
-                    isError = uiState.errorMessage?.contains("correo") == true
+                    isError = uiState.errorMessage != null
                 )
 
                 OutlinedTextField(
@@ -78,7 +67,7 @@ fun RegisterScreen(
                     label = { Text("Contraseña") },
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
-                    isError = uiState.errorMessage?.contains("contraseña") == true
+                    isError = uiState.errorMessage != null
                 )
 
                 OutlinedTextField(
@@ -87,7 +76,7 @@ fun RegisterScreen(
                     label = { Text("Confirmar Contraseña") },
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
-                    isError = uiState.errorMessage?.contains("contraseñas no coinciden") == true
+                    isError = uiState.errorMessage != null
                 )
 
                 Button(

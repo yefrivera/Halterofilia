@@ -2,74 +2,100 @@ package edu.unicauca.halterfilia_cauca.ui.features.athlete_registration
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.unicauca.halterfilia_cauca.ui.theme.HalterofiliaCaucaTheme
-
 import androidx.navigation.NavController
-import edu.unicauca.halterfilia_cauca.ui.navigation.AppScreens
+import edu.unicauca.halterfilia_cauca.ui.theme.HalterofiliaCaucaTheme
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.*
 
-/**
- * Composable Stateful
- */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AthleteRegistrationScreen(
     navController: NavController,
-    newAthleteViewModel: NewAthleteViewModel = viewModel()
+    viewModel: AthleteRegistrationViewModel = viewModel()
 ) {
-    NewAthleteContent(
-        fullName = newAthleteViewModel.fullName,
-        age = newAthleteViewModel.age,
-        height = newAthleteViewModel.height,
-        weight = newAthleteViewModel.weight,
-        onFullNameChange = { newAthleteViewModel.onFullNameChange(it) },
-        onAgeChange = { newAthleteViewModel.onAgeChange(it) },
-        onHeightChange = { newAthleteViewModel.onHeightChange(it) },
-        onWeightChange = { newAthleteViewModel.onWeightChange(it) },
-        onAddAthleteClicked = {
-            // Ejemplo: Navegar de vuelta a la pantalla de atletas
-            navController.popBackStack()
+    val registrationState by viewModel.registrationState.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    // Listen for state changes to show snackbar or navigate back
+    LaunchedEffect(registrationState) {
+        when (val state = registrationState) {
+            is RegistrationState.Success -> {
+                // Navigate back to the previous screen on success
+                navController.popBackStack()
+            }
+            is RegistrationState.Error -> {
+                // Show error message in a snackbar
+                scope.launch {
+                    snackbarHostState.showSnackbar(state.message)
+                }
+                // Reset the state in the ViewModel so the error isn't shown again
+                viewModel.resetRegistrationState()
+            }
+            else -> {
+                // Idle or Loading, do nothing here
+            }
+        }
+    }
+
+    AthleteRegistrationContent(
+        name = viewModel.name,
+        birthDate = viewModel.birthDate,
+        height = viewModel.height,
+        weight = viewModel.weight,
+        onNameChange = viewModel::onNameChange,
+        onBirthDateChange = viewModel::onBirthDateChange,
+        onHeightChange = viewModel::onHeightChange,
+        onWeightChange = viewModel::onWeightChange,
+        onSaveAthleteClicked = {
+            viewModel.saveAthlete()
         },
         onNavigateBack = {
             navController.popBackStack()
-        }
+        },
+        isLoading = registrationState is RegistrationState.Loading,
+        snackbarHostState = snackbarHostState
     )
 }
 
-/**
- * Composable Stateless que dibuja el formulario
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NewAthleteContent(
-    fullName: String,
-    age: String,
+fun AthleteRegistrationContent(
+    name: String,
+    birthDate: String,
     height: String,
     weight: String,
-    onFullNameChange: (String) -> Unit,
-    onAgeChange: (String) -> Unit,
+    onNameChange: (String) -> Unit,
+    onBirthDateChange: (String) -> Unit,
     onHeightChange: (String) -> Unit,
     onWeightChange: (String) -> Unit,
-    onAddAthleteClicked: () -> Unit,
-    onNavigateBack: () -> Unit
+    onSaveAthleteClicked: () -> Unit,
+    onNavigateBack: () -> Unit,
+    isLoading: Boolean,
+    snackbarHostState: SnackbarHostState
 ) {
+    val datePickerState = rememberDatePickerState()
+    var showDatePicker by remember { mutableStateOf(false) }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Nuevo deportista") },
+                title = { Text("Nuevo Deportista") },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(onClick = onNavigateBack, enabled = !isLoading) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Volver"
@@ -84,85 +110,115 @@ fun NewAthleteContent(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(16.dp)
-                .verticalScroll(rememberScrollState()) // Hacemos la columna desplazable
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Campos de texto del formulario
             OutlinedTextField(
-                value = fullName,
-                onValueChange = onFullNameChange,
+                value = name,
+                onValueChange = onNameChange,
                 label = { Text("Nombres y apellidos") },
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true
+                singleLine = true,
+                enabled = !isLoading
             )
-
             Spacer(modifier = Modifier.height(16.dp))
-
             OutlinedTextField(
-                value = age,
-                onValueChange = onAgeChange,
-                label = { Text("Edad") },
+                value = birthDate,
+                onValueChange = onBirthDateChange,
+                label = { Text("Fecha de Nacimiento") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                enabled = !isLoading,
+                readOnly = true,
+                trailingIcon = {
+                    IconButton(onClick = { showDatePicker = true }) {
+                        Icon(Icons.Default.DateRange, contentDescription = "Seleccionar fecha")
+                    }
+                }
             )
-
             Spacer(modifier = Modifier.height(16.dp))
-
             OutlinedTextField(
                 value = height,
                 onValueChange = onHeightChange,
-                label = { Text("Estatura") },
+                label = { Text("Estatura (cm)") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                enabled = !isLoading
             )
-
             Spacer(modifier = Modifier.height(16.dp))
-
             OutlinedTextField(
                 value = weight,
                 onValueChange = onWeightChange,
-                label = { Text("Peso") },
+                label = { Text("Peso (kg)") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                enabled = !isLoading
             )
-
-            Spacer(modifier = Modifier.weight(1f)) // Empuja el botón hacia abajo
-
-            // Botón para agregar
+            Spacer(modifier = Modifier.weight(1f))
             Button(
-                onClick = onAddAthleteClicked,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .offset(y = (-30).dp),
+                onClick = onSaveAthleteClicked,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isLoading
             ) {
-                Icon(imageVector = Icons.Default.Add, contentDescription = "Agregar")
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(text = "Agregar", fontSize = 16.sp)
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    Text(text = "Guardar Deportista")
+                }
             }
+        }
+    }
+
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val selectedDate = datePickerState.selectedDateMillis
+                        if (selectedDate != null) {
+                            val formattedDate = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(selectedDate))
+                            onBirthDateChange(formattedDate)
+                        }
+                        showDatePicker = false
+                    }
+                ) {
+                    Text("Aceptar")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDatePicker = false }
+                ) {
+                    Text("Cancelar")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
         }
     }
 }
 
-/**
- * Previsualización
- */
 @Preview(showBackground = true)
 @Composable
 fun NewAthleteScreenPreview() {
     HalterofiliaCaucaTheme {
-        NewAthleteContent(
-            fullName = "Yefri Estiven Vera",
-            age = "25",
+        AthleteRegistrationContent(
+            name = "Yefri Vera",
+            birthDate = "01/01/1999",
             height = "180",
             weight = "80",
-            onFullNameChange = {},
-            onAgeChange = {},
+            onNameChange = {},
+            onBirthDateChange = {},
             onHeightChange = {},
             onWeightChange = {},
-            onAddAthleteClicked = {},
-            onNavigateBack = {}
+            onSaveAthleteClicked = {},
+            onNavigateBack = {},
+            isLoading = false,
+            snackbarHostState = SnackbarHostState()
         )
     }
 }

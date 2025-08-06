@@ -60,6 +60,7 @@ dependencies {
     implementation(libs.androidx.navigation.compose.android)
     //implementation(libs.firebase.auth.ktx)
     implementation(libs.androidx.espresso.core)
+    implementation(libs.firebase.firestore.ktx)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -84,6 +85,10 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:34.0.0"))
     implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.firebase:firebase-auth-ktx:22.3.1")
+
+    implementation("com.google.firebase:firebase-firestore-ktx")
+    implementation ("com.google.firebase:firebase-firestore:24.11.1")
+    implementation ("com.google.firebase:firebase-firestore-ktx:24.11.1")
 
 
 
