@@ -28,6 +28,36 @@ class LoginViewModel : ViewModel() {
             LoginEvent.MessageShown -> {
                 _uiState.value = _uiState.value.copy(errorMessage = null, successMessage = null)
             }
+            LoginEvent.ForgotPasswordClicked -> {
+                _uiState.value = _uiState.value.copy(showPasswordRecoveryDialog = true)
+            }
+            LoginEvent.DismissPasswordRecoveryDialog -> {
+                _uiState.value = _uiState.value.copy(showPasswordRecoveryDialog = false)
+            }
+        }
+    }
+
+    fun sendPasswordResetEmail(email: String) {
+        if (email.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
+            _uiState.value = _uiState.value.copy(errorMessage = "Por favor, ingrese un correo válido.")
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true)
+            auth.sendPasswordResetEmail(email)
+                .addOnCompleteListener { task ->
+                    if (task.isSuccessful) {
+                        _uiState.value = _uiState.value.copy(
+                            successMessage = "Se ha enviado un correo para restablecer la contraseña."
+                        )
+                    } else {
+                        _uiState.value = _uiState.value.copy(
+                            errorMessage = "Error al enviar el correo: ${task.exception?.message}"
+                        )
+                    }
+                    _uiState.value = _uiState.value.copy(isLoading = false, showPasswordRecoveryDialog = false)
+                }
         }
     }
 
@@ -71,7 +101,8 @@ data class LoginState(
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
     val successMessage: String? = null,
-    val isLoginSuccess: Boolean = false
+    val isLoginSuccess: Boolean = false,
+    val showPasswordRecoveryDialog: Boolean = false
 )
 
 sealed class LoginEvent {
@@ -79,4 +110,6 @@ sealed class LoginEvent {
     data class PasswordChanged(val password: String) : LoginEvent()
     object Login : LoginEvent()
     object MessageShown : LoginEvent()
+    object ForgotPasswordClicked : LoginEvent()
+    object DismissPasswordRecoveryDialog : LoginEvent()
 }

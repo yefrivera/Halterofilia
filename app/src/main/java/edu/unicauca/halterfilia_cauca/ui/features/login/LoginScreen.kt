@@ -8,7 +8,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -46,12 +48,20 @@ fun LoginScreen(navController: NavController, loginViewModel: LoginViewModel = v
         }
     }
 
+    // Efecto para mostrar mensajes de exito
+    LaunchedEffect(uiState.successMessage) {
+        uiState.successMessage?.let { message ->
+            snackbarHostState.showSnackbar(message)
+            loginViewModel.onLoginEvent(LoginEvent.MessageShown)
+        }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
         LoginContent(
             uiState = uiState,
-            onEvent = loginViewModel::onLoginEvent,
+            loginViewModel = loginViewModel,
             onRegisterClicked = {
                 navController.navigate(AppScreens.RegisterScreen.route)
             },
@@ -63,7 +73,7 @@ fun LoginScreen(navController: NavController, loginViewModel: LoginViewModel = v
 @Composable
 fun LoginContent(
     uiState: LoginState,
-    onEvent: (LoginEvent) -> Unit,
+    loginViewModel: LoginViewModel,
     onRegisterClicked: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -97,7 +107,7 @@ fun LoginContent(
 
             OutlinedTextField(
                 value = uiState.email,
-                onValueChange = { onEvent(LoginEvent.EmailChanged(it)) },
+                onValueChange = { loginViewModel.onLoginEvent(LoginEvent.EmailChanged(it)) },
                 label = { Text("Correo") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
@@ -109,7 +119,7 @@ fun LoginContent(
 
             OutlinedTextField(
                 value = uiState.password,
-                onValueChange = { onEvent(LoginEvent.PasswordChanged(it)) },
+                onValueChange = { loginViewModel.onLoginEvent(LoginEvent.PasswordChanged(it)) },
                 label = { Text("Contraseña") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
@@ -121,14 +131,20 @@ fun LoginContent(
             Spacer(modifier = Modifier.height(24.dp))
 
             Button(
-                onClick = { onEvent(LoginEvent.Login) },
+                onClick = { loginViewModel.onLoginEvent(LoginEvent.Login) },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !uiState.isLoading
             ) {
                 Text(text = "Iniciar sesión", fontSize = 16.sp)
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+
+            TextButton(onClick = { loginViewModel.onLoginEvent(LoginEvent.ForgotPasswordClicked) }) {
+                Text(text = "¿Olvidaste tu contraseña?")
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             Text(text = "¿No tienes una cuenta?")
 
@@ -148,5 +164,54 @@ fun LoginContent(
         if (uiState.isLoading) {
             CircularProgressIndicator()
         }
+
+        if (uiState.showPasswordRecoveryDialog) {
+            var email by remember { mutableStateOf("") }
+            PasswordRecoveryDialog(
+                email = email,
+                onEmailChanged = { email = it },
+                onDismiss = { loginViewModel.onLoginEvent(LoginEvent.DismissPasswordRecoveryDialog) },
+                onConfirm = {
+                    loginViewModel.sendPasswordResetEmail(email)
+                }
+            )
+        }
     }
+}
+
+@Composable
+fun PasswordRecoveryDialog(
+    email: String,
+    onEmailChanged: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Recuperar contraseña") },
+        text = {
+            Column {
+                Text("Ingresa tu correo electrónico para enviarte un enlace de recuperación.")
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = onEmailChanged,
+                    label = { Text("Correo electrónico") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm
+            ) {
+                Text("Enviar")
+            }
+        },
+        dismissButton = {
+            Button(onClick = onDismiss) {
+                Text("Cancelar")
+            }
+        }
+    )
 }

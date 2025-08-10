@@ -21,11 +21,11 @@ class BluetoothViewModel(
     app: Application
 ) : AndroidViewModel(app) {
 
-    private val bluetoothController by lazy {
+    val bluetoothController by lazy {
         BluetoothController(app)
     }
 
-    private val _state = MutableStateFlow(BluetoothUiState())
+    val _state = MutableStateFlow(BluetoothUiState())
     val state = combine(
         bluetoothController.scannedDevices,
         bluetoothController.connectedDevices,
