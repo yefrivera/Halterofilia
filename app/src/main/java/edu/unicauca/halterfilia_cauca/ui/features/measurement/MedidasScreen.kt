@@ -1,68 +1,62 @@
 package edu.unicauca.halterfilia_cauca.ui.features.measurement
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.unicauca.halterfilia_cauca.ui.theme.HalterofiliaCaucaTheme
-
 import androidx.navigation.NavController
+import edu.unicauca.halterfilia_cauca.core.bluetooth.BluetoothController
+import edu.unicauca.halterfilia_cauca.data.MeasurementRepository
 
-/**
- * Composable Stateful
- */
 @Composable
 fun MedidasScreen(
     navController: NavController,
-    measureViewModel: MeasureViewModel = viewModel()
+    athleteName: String,
+    athleteDocId: String,
+    bluetoothController: BluetoothController
 ) {
-    MeasureContent(
-        athleteName = measureViewModel.athleteName,
-        isMeasuring = measureViewModel.isMeasuring,
-        repetitions = measureViewModel.repetitions,
-        onStartClicked = { measureViewModel.onStartMeasuring() },
-        onStopClicked = { measureViewModel.onStopMeasuring() },
-        onRepetitionOptionsClicked = {
-            // Ejemplo: Volver a la pantalla anterior
-            navController.popBackStack()
-        },
-        onNavigateBack = {
-            navController.popBackStack()
-        }
+    val measurementRepository = MeasurementRepository()
+    val medidasViewModel: MedidasViewModel = viewModel(
+        factory = MedidasViewModelFactory(bluetoothController, measurementRepository, athleteDocId)
+    )
+    val state by medidasViewModel.state.collectAsState()
+
+    MedidasContent(
+        athleteName = athleteName,
+        state = state,
+        onStartClicked = { medidasViewModel.startMeasurement() },
+        onStopClicked = { medidasViewModel.stopMeasurement() },
+        onSaveClicked = { medidasViewModel.saveMeasurement() },
+        onNavigateBack = { navController.popBackStack() },
+        onCheckSlave = { medidasViewModel.checkSlaveStatus() }
     )
 }
 
-/**
- * Composable Stateless que dibuja la UI
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MeasureContent(
+fun MedidasContent(
     athleteName: String,
-    isMeasuring: Boolean,
-    repetitions: List<Repetition>,
+    state: MeasurementState,
     onStartClicked: () -> Unit,
     onStopClicked: () -> Unit,
-    onRepetitionOptionsClicked: (Repetition) -> Unit,
-    onNavigateBack: () -> Unit
+    onSaveClicked: () -> Unit,
+    onNavigateBack: () -> Unit,
+    onCheckSlave: () -> Unit
 ) {
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(athleteName) },
+                title = { Text("Deportista: $athleteName") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
@@ -79,109 +73,108 @@ fun MeasureContent(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
+            // Master Connection Status
             Text(
-                text = "Tomar medidas",
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.padding(vertical = 16.dp)
+                text = if (state.isConnected) "Dispositivo Conectado" else "Dispositivo Desconectado",
+                color = if (state.isConnected) Color(0xFF00C853) else Color.Red,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Slave Connection Status
+            val slaveStatusText: String
+            val slaveStatusColor: Color
+            when (state.slaveStatus) {
+                SlaveStatus.UNKNOWN -> {
+                    slaveStatusText = "Esclavo: Desconocido"
+                    slaveStatusColor = Color.Gray
+                }
+                SlaveStatus.CHECKING -> {
+                    slaveStatusText = "Verificando Esclavo..."
+                    slaveStatusColor = Color.Blue
+                }
+                SlaveStatus.CONNECTED -> {
+                    slaveStatusText = "Esclavo: Conectado"
+                    slaveStatusColor = Color(0xFF00C853)
+                }
+                SlaveStatus.ERROR -> {
+                    slaveStatusText = "Esclavo: No encontrado"
+                    slaveStatusColor = Color.Red
+                }
+            }
+            Text(
+                text = slaveStatusText,
+                color = slaveStatusColor,
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp
             )
 
-            // Botones de Iniciar y Parar
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Display Measurement Result
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(150.dp),
+                elevation = CardDefaults.cardElevation(4.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    if (state.isMeasuring) {
+                        CircularProgressIndicator()
+                    } else {
+                        Text(
+                            text = state.calculatedValue?.let { String.format("%.2f", it) } ?: "0.00",
+                            fontSize = 48.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Último dato recibido: ${state.lastReceivedData}",
+                style = MaterialTheme.typography.bodySmall
+            )
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // Action Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                Button(onClick = onStartClicked, enabled = !isMeasuring) {
-                    Text("Iniciar")
-                }
-                Button(onClick = onStopClicked, enabled = isMeasuring) {
-                    Text("Parar")
-                }
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Lista de repeticiones
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp) // Espacio entre items
-            ) {
-                items(repetitions) { repetition ->
-                    RepetitionItem(
-                        repetition = repetition,
-                        onOptionsClicked = { onRepetitionOptionsClicked(repetition) }
+                Button(
+                    onClick = {
+                        if (state.isMeasuring) onStopClicked() else onStartClicked()
+                    },
+                    enabled = state.isConnected && state.slaveStatus == SlaveStatus.CONNECTED,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (state.isMeasuring) Color.Red else MaterialTheme.colorScheme.primary
                     )
+                ) {
+                    Text(if (state.isMeasuring) "Detener Medición" else "Iniciar Medición")
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Button(
+                    onClick = onSaveClicked,
+                    enabled = state.calculatedValue != null,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Guardar Medida")
                 }
             }
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = onCheckSlave,
+                enabled = state.isConnected
+            ) {
+                Text("Verificar Esclavo")
+            }
         }
-    }
-}
-
-/**
- * Composable para un solo item de la lista de repeticiones
- */
-@Composable
-fun RepetitionItem(
-    repetition: Repetition,
-    onOptionsClicked: () -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        // Chip de Repetición
-        Card(
-            shape = RoundedCornerShape(50), // Forma de píldora
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF8BC34A)) // Verde
-        ) {
-            Text(
-                text = repetition.name,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                color = Color.White,
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        // Chip de Ángulo
-        Card(
-            shape = RoundedCornerShape(50),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-            modifier = Modifier.weight(1f)
-        ) {
-            Text(
-                text = repetition.angle?.let { "$it°" } ?: "Ángulo",
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-        }
-
-        // Botón de opciones
-        IconButton(onClick = onOptionsClicked) {
-            Icon(imageVector = Icons.Default.MoreVert, contentDescription = "Opciones")
-        }
-    }
-}
-
-/**
- * Previsualización
- */
-@Preview(showBackground = true)
-@Composable
-fun MeasureScreenPreview() {
-    HalterofiliaCaucaTheme {
-        MeasureContent(
-            athleteName = "Deportista X",
-            isMeasuring = false,
-            repetitions = listOf(
-                Repetition(1, "Repetición 1", 89.5f),
-                Repetition(2, "Repetición 2", 91.2f),
-                Repetition(3, "Repetición 3")
-            ),
-            onStartClicked = {},
-            onStopClicked = {},
-            onRepetitionOptionsClicked = {},
-            onNavigateBack = {}
-        )
     }
 }

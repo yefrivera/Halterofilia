@@ -42,7 +42,12 @@ fun AthleteScreen(
     val onAthleteOptionSelected = { athlete: Athlete, action: AthleteMenuAction ->
         when (action) {
             AthleteMenuAction.CONSULT -> athleteViewModel.onConsultAthleteClicked(athlete)
-            AthleteMenuAction.MEASURE -> navController.navigate(AppScreens.MedidasScreen.route)
+            AthleteMenuAction.MEASURE -> {
+                val athleteId = athlete.id ?: ""
+                navController.navigate(
+                    AppScreens.MedidasScreen.route + "/${athlete.name}/$athleteId"
+                )
+            }
             AthleteMenuAction.HISTORY -> navController.navigate(AppScreens.HistoryScreen.route)
             AthleteMenuAction.DELETE -> athleteViewModel.onDeleteAthleteClicked(athlete)
         }
