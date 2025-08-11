@@ -1,9 +1,9 @@
 package edu.unicauca.halterfilia_cauca.ui.features.measurement
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import edu.unicauca.halterfilia_cauca.core.bluetooth.BLEData
-import edu.unicauca.halterfilia_cauca.core.bluetooth.BluetoothController
+import edu.unicauca.halterfilia_cauca.data.FileRepository
 import edu.unicauca.halterfilia_cauca.data.MeasurementRepository
 import edu.unicauca.halterfilia_cauca.domain.model.Measurement
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,6 +13,9 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+
+import edu.unicauca.halterfilia_cauca.core.bluetooth.BLEData
+import edu.unicauca.halterfilia_cauca.core.bluetooth.BluetoothController
 
 enum class SlaveStatus {
     UNKNOWN,
@@ -25,13 +28,15 @@ data class MeasurementState(
     val isConnected: Boolean = false,
     val calculatedValue: Float? = null,
     val isMeasuring: Boolean = false,
+    val isReceiving: Boolean = false, // Nuevo estado
     val lastReceivedData: String = "",
-    val slaveStatus: SlaveStatus = SlaveStatus.UNKNOWN,
+    val lastMeasurementJson: String? = null
 )
 
 class MedidasViewModel(
     private val bluetoothController: BluetoothController,
     private val measurementRepository: MeasurementRepository,
+    private val fileRepository: FileRepository, // Add FileRepository
     private val athleteId: String
 ) : ViewModel() {
 
@@ -44,44 +49,31 @@ class MedidasViewModel(
             .onEach { connectedMap ->
                 val isConnected = connectedMap.isNotEmpty()
                 _state.value = _state.value.copy(isConnected = isConnected)
-                if (isConnected) {
-                    checkSlaveStatus()
-                } else {
-                    _state.value = _state.value.copy(slaveStatus = SlaveStatus.UNKNOWN)
-                }
             }
             .launchIn(viewModelScope)
 
         // Observe incoming data
-        bluetoothController.bleData
+        bluetoothController.measurementDataFlow
             .onEach { data ->
-                when(data) {
-                    is BLEData.MeasurementData -> {
-                        _state.value = _state.value.copy(lastReceivedData = data.payload)
-                        processIncomingData(data.payload)
-                    }
-                    is BLEData.SlaveStatus -> {
-                        val status = if (data.status == "SLAVE_OK") SlaveStatus.CONNECTED else SlaveStatus.ERROR
-                        _state.value = _state.value.copy(slaveStatus = status)
-                    }
-                    null -> {}
+                data?.let {
+                    Log.d("MedidasViewModel", "Datos recibidos del controller: $it") // LOG AÑADIDO
+                    _state.value = _state.value.copy(
+                        lastReceivedData = it,
+                        isMeasuring = false, // Detener medición
+                        isReceiving = false  // Finaliza la recepción
+                    )
+                    processIncomingData(it)
+                    saveMeasurementToFile(it)
+                    bluetoothController.clearMeasurementData() // Reset the flow
                 }
             }
             .launchIn(viewModelScope)
     }
 
-    fun checkSlaveStatus() {
-        if (_state.value.isConnected) {
-            val connectedDeviceAddress = bluetoothController.connectedDevices.value.keys.firstOrNull()
-            if (connectedDeviceAddress != null) {
-                _state.value = _state.value.copy(slaveStatus = SlaveStatus.CHECKING)
-                bluetoothController.sendData(connectedDeviceAddress, "CHECK_SLAVE")
-            }
-        }
-    }
+    
 
     fun startMeasurement() {
-        if (_state.value.isConnected && _state.value.slaveStatus == SlaveStatus.CONNECTED) {
+        if (_state.value.isConnected) {
             val connectedDeviceAddress = bluetoothController.connectedDevices.value.keys.firstOrNull()
             if (connectedDeviceAddress != null) {
                 _state.value = _state.value.copy(isMeasuring = true, calculatedValue = null, lastReceivedData = "")
@@ -94,6 +86,7 @@ class MedidasViewModel(
         if (_state.value.isConnected) {
             val connectedDeviceAddress = bluetoothController.connectedDevices.value.keys.firstOrNull()
             if (connectedDeviceAddress != null) {
+                _state.value = _state.value.copy(isReceiving = true) // Inicia la recepción
                 bluetoothController.sendData(connectedDeviceAddress, "STOP")
             }
         }
@@ -146,5 +139,26 @@ class MedidasViewModel(
                 _state.value = _state.value.copy(calculatedValue = null)
             }
         }
+    }
+
+    private fun saveMeasurementToFile(jsonData: String) {
+        viewModelScope.launch {
+            fileRepository.saveMeasurementToFile(jsonData)
+        }
+    }
+
+    fun showLastMeasurement() {
+        viewModelScope.launch {
+            val result = fileRepository.readLastMeasurementFile()
+            result.onSuccess {
+                _state.value = _state.value.copy(lastMeasurementJson = it)
+            }.onFailure {
+                // Handle error, e.g., show a toast
+            }
+        }
+    }
+
+    fun clearLastMeasurementJson() {
+        _state.value = _state.value.copy(lastMeasurementJson = null)
     }
 }

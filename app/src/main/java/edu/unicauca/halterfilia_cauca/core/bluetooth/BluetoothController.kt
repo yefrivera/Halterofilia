@@ -63,8 +63,11 @@ class BluetoothController(
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
 
-    private val _bleData = MutableStateFlow<BLEData?>(null)
+        private val _bleData = MutableStateFlow<BLEData?>(null)
     val bleData: StateFlow<BLEData?> = _bleData.asStateFlow()
+
+    private val _measurementDataFlow = MutableStateFlow<String?>(null)
+    val measurementDataFlow: StateFlow<String?> = _measurementDataFlow.asStateFlow()
 
     private val gattConnections = mutableMapOf<String, BluetoothGatt>()
     private val dataBuffer = StringBuilder()
@@ -75,15 +78,16 @@ class BluetoothController(
             Log.d("BLUETOOTH_DEBUG", "onConnectionStateChange for $deviceAddress: status=$status, newState=$newState")
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
-                    Log.i("BLUETOOTH_DEBUG", "Device connected: $deviceAddress. Starting service discovery.")
+                    Log.i("BLUETOOTH_DEBUG", "Device connected: $deviceAddress. Requesting MTU.")
+                    // Solicitar un MTU más grande para transferencias de datos más rápidas y estables
+                    gatt.requestMtu(517) // 517 es el máximo para muchos dispositivos
+
                     _connectedDevices.update { devices ->
                         val device = gatt.device.toBluetoothDeviceDomain(isConnected = true)
                         devices + (deviceAddress to device)
                     }
                     gattConnections[deviceAddress] = gatt
-                    Handler(Looper.getMainLooper()).post {
-                        gatt.discoverServices()
-                    }
+                    // El descubrimiento de servicios se moverá a onMtuChanged
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                     Log.i("BLUETOOTH_DEBUG", "Device disconnected: $deviceAddress")
                     _connectedDevices.update { devices ->
@@ -100,29 +104,41 @@ class BluetoothController(
             }
         }
 
+        override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                Log.i("BLUETOOTH_DEBUG", "MTU changed to $mtu. Starting service discovery.")
+                gatt?.discoverServices()
+            } else {
+                Log.w("BLUETOOTH_DEBUG", "Failed to change MTU. Status: $status")
+            }
+        }
+
         override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 Log.i("BLUETOOTH_DEBUG", "Services discovered successfully for ${gatt?.device?.address}")
-                val targetService = gatt?.getService(serviceUUID)
-                if (targetService == null) {
-                    Log.e("BLUETOOTH_DEBUG", "Service with UUID $serviceUUID NOT FOUND.")
-                    return
-                }
+                // AÑADIR UN RETRASO ANTES DE HABILITAR LAS NOTIFICACIONES
+                Handler(Looper.getMainLooper()).postDelayed({
+                    val targetService = gatt?.getService(serviceUUID)
+                    if (targetService == null) {
+                        Log.e("BLUETOOTH_DEBUG", "Service with UUID $serviceUUID NOT FOUND.")
+                        return@postDelayed
+                    }
 
-                val notifyCharacteristic = targetService.getCharacteristic(notifyCharacteristicUUID)
-                if (notifyCharacteristic == null) {
-                    Log.e("BLUETOOTH_DEBUG", "Notify Characteristic with UUID $notifyCharacteristicUUID NOT FOUND.")
-                } else {
-                    Log.i("BLUETOOTH_DEBUG", "Found Notify Characteristic. Enabling notifications.")
-                    enableNotifications(gatt, notifyCharacteristic)
-                }
+                    val notifyCharacteristic = targetService.getCharacteristic(notifyCharacteristicUUID)
+                    if (notifyCharacteristic == null) {
+                        Log.e("BLUETOOTH_DEBUG", "Notify Characteristic with UUID $notifyCharacteristicUUID NOT FOUND.")
+                    } else {
+                        Log.i("BLUETOOTH_DEBUG", "Found Notify Characteristic. Enabling notifications.")
+                        enableNotifications(gatt, notifyCharacteristic)
+                    }
 
-                val writeCharacteristic = targetService.getCharacteristic(writeCharacteristicUUID)
-                if (writeCharacteristic == null) {
-                    Log.e("BLUETOOTH_DEBUG", "Write Characteristic with UUID $writeCharacteristicUUID NOT FOUND.")
-                } else {
-                    Log.i("BLUETOOTH_DEBUG", "Found Write Characteristic.")
-                }
+                    val writeCharacteristic = targetService.getCharacteristic(writeCharacteristicUUID)
+                    if (writeCharacteristic == null) {
+                        Log.e("BLUETOOTH_DEBUG", "Write Characteristic with UUID $writeCharacteristicUUID NOT FOUND.")
+                    } else {
+                        Log.i("BLUETOOTH_DEBUG", "Found Write Characteristic.")
+                    }
+                }, 500) // 500 ms de retraso
 
             } else {
                 Log.w("BLUETOOTH_DEBUG", "onServicesDiscovered received error status: $status")
@@ -130,23 +146,23 @@ class BluetoothController(
         }
 
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
-            val receivedString = String(value, Charsets.UTF_8)
-            // AÑADE ESTA LÍNEA PARA VER TODO LO QUE LLEGA
-            Log.d("BLE_RECEIVE", "Datos recibidos del Master: '$receivedString'")
-            if (characteristic.uuid == notifyCharacteristicUUID) {
+            val receivedString = String(value, Charsets.UTF_8).trim()
+            Log.d("BLE_RECEIVE", "Dato crudo recibido: '$receivedString'") // LOG AÑADIDO
 
+            if (characteristic.uuid == notifyCharacteristicUUID) {
                 when (receivedString) {
                     "SLAVE_OK", "SLAVE_ERROR" -> {
                         _bleData.value = BLEData.SlaveStatus(receivedString)
                     }
                     "END" -> {
-                        Log.i("BLUETOOTH_DEBUG", ">>>>>> END OF DATA RECEIVED <<<<<<")
-                        _bleData.value = BLEData.MeasurementData(dataBuffer.toString())
+                        Log.i("BLE_RECEIVE", ">>>>>> SEÑAL 'END' RECIBIDA <<<<<<") // LOG AÑADIDO
+                        val completeData = dataBuffer.toString()
+                        Log.d("BLE_RECEIVE", "Datos completos ensamblados: $completeData") // LOG AÑADIDO
+                        _measurementDataFlow.value = completeData
                         dataBuffer.clear() // Reset buffer for next message
                     }
                     else -> {
                         dataBuffer.append(receivedString)
-                        Log.i("BLUETOOTH_DEBUG", "Received chunk: $receivedString. Buffer size: ${dataBuffer.length}")
                     }
                 }
             }
@@ -276,6 +292,10 @@ class BluetoothController(
         if (isScanning.value) {
             stopScan()
         }
+    }
+
+    fun clearMeasurementData() {
+        _measurementDataFlow.value = null
     }
 
     private fun hasPermission(permission: String): Boolean {

@@ -17,9 +17,6 @@ unsigned long tiempoPrevio;
 unsigned long tiempoInicio;
 int idx = 0;
 bool midiendo = false;
-volatile bool slaveDone = false;
-volatile bool pongReceived = false;
-unsigned long pingSentTime = 0;
 
 // Buffers para datos
 #define BUFFER_SIZE 8192
@@ -43,192 +40,192 @@ BLECharacteristic *pComando;
 // --- Funciones ---
 void obtenerAnguloTotal();
 void recalibrarMPU();
-void sendDataInChunks(BLECharacteristic* pChar, const char* data, int length);
-void sendCombinedData();
 
 class CmdCallbacks: public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic *pChar) {
-    String value = String(pChar->getValue().c_str());
-    if (value == "START") {
-      midiendo = true;
-      slaveDone = false;
-      masterIndex = 0;
-      slaveIndex = 0;
-      bufferMaster[0] = '\0';
-      bufferSlave[0] = '\0';
-      idx = 0;
-      tiempoInicio = millis();
-      esp_now_send(slaveAddress, (uint8_t*)"START", 5);
-      Serial.println("✅ [MASTER] Medición iniciada");
+    void onWrite(BLECharacteristic *pChar) {
+        String value = String(pChar->getValue().c_str());
+        if (value == "START") {
+            midiendo = true;
+            masterIndex = 0;
+            slaveIndex = 0;
+            bufferMaster[0] = '\0';
+            bufferSlave[0] = '\0';
+            idx = 0;
+            tiempoInicio = millis();
+            esp_now_send(slaveAddress, (uint8_t*)"START", 5);
+            Serial.println("✅ [MASTER] Medición iniciada");
+        }
+        else if (value == "STOP") {
+            Serial.println("========================================");
+            Serial.println("DEBUG: Comando STOP recibido.");
+            midiendo = false;
+            esp_now_send(slaveAddress, (uint8_t*)"STOP", 4);
+
+            size_t totalSize = masterIndex + slaveIndex;
+            Serial.print("DEBUG: Tamaño total del buffer a enviar: ");
+            Serial.println(totalSize);
+
+            if (totalSize == 0) {
+                Serial.println("DEBUG: Buffer vacío, no se enviará nada.");
+            } else {
+                char* paqueteFinal = (char*)malloc(totalSize + 1);
+
+                if (paqueteFinal) {
+                    Serial.println("DEBUG: Memoria para paqueteFinal alocada correctamente.");
+                    memcpy(paqueteFinal, bufferMaster, masterIndex);
+                    memcpy(paqueteFinal + masterIndex, bufferSlave, slaveIndex);
+                    paqueteFinal[totalSize] = '\0';
+
+                    Serial.println("DEBUG: Iniciando envío por fragmentos...");
+                    size_t chunkSize = 500;
+                    size_t offset = 0;
+                    int chunkCount = 0;
+                    while (offset < totalSize) {
+                        chunkCount++;
+                        size_t remaining = totalSize - offset;
+                        size_t currentChunkSize = remaining > chunkSize ? chunkSize : remaining;
+
+                        Serial.print("DEBUG: Enviando fragmento #");
+                        Serial.print(chunkCount);
+                        Serial.print(" (tamaño: ");
+                        Serial.print(currentChunkSize);
+                        Serial.println(")");
+
+                        pAnguloTotal->setValue((uint8_t*)(paqueteFinal + offset), currentChunkSize);
+                        bool fueEnviado = pAnguloTotal->notify();
+
+                        Serial.print("DEBUG: pAnguloTotal->notify() retornó: ");
+                        Serial.println(fueEnviado ? "true" : "false");
+
+                        offset += currentChunkSize;
+                        delay(20); // Aumentamos el delay para dar más tiempo
+                    }
+                    Serial.println("DEBUG: Bucle de envío finalizado.");
+
+                    free(paqueteFinal);
+                } else {
+                    Serial.println("ERROR FATAL: No se pudo alocar memoria para el paquete final");
+                }
+            }
+
+            Serial.println("DEBUG: Enviando señal de finalización 'END'...");
+            pAnguloTotal->setValue((uint8_t*)"END", 3);
+            bool endEnviado = pAnguloTotal->notify();
+            Serial.print("DEBUG: notify() para 'END' retornó: ");
+            Serial.println(endEnviado ? "true" : "false");
+
+            masterIndex = 0;
+            slaveIndex = 0;
+            bufferMaster[0] = '\0';
+            bufferSlave[0] = '\0';
+            Serial.println("========================================");
+        }
     }
-    else if (value == "STOP") {
-      midiendo = false;
-      esp_now_send(slaveAddress, (uint8_t*)"STOP", 4);
-      Serial.println("⏹ [MASTER] Comando STOP enviado a SLAVE. Esperando datos...");
-    }
-    else if (value == "CALIBRAR") {
-      recalibrarMPU();
-      esp_now_send(slaveAddress, (uint8_t*)"CALIBRAR", 8);
-      Serial.println("⚙️ [MASTER] Calibración completada");
-    }
-    else if (value == "CHECK_SLAVE") {
-      Serial.println("Recibido CHECK_SLAVE. Enviando PING a SLAVE...");
-      pongReceived = false;
-      esp_now_send(slaveAddress, (uint8_t*)"PING", 4);
-      pingSentTime = millis();
-      // The result will be sent from the main loop after timeout or PONG
-    }
-  }
 };
 
 // --- Callback recepción datos ESP-NOW ---
 void OnDataRecv(const esp_now_recv_info *info, const uint8_t *data, int data_len) {
-  if (data_len == 10 && memcmp(data, "SLAVE_DONE", 10) == 0) {
-    slaveDone = true;
-    Serial.println("✅ [MASTER] SLAVE_DONE recibido. Enviando datos a la app.");
-    sendCombinedData();
-  } else if (data_len == 4 && memcmp(data, "PONG", 4) == 0) {
-    pongReceived = true;
-    Serial.println("✅ [MASTER] PONG recibido de SLAVE.");
-  } else {
-    if ((slaveIndex + data_len) < BUFFER_SIZE) {
-      memcpy(bufferSlave + slaveIndex, data, data_len);
-      slaveIndex += data_len;
+    if ((slaveIndex + data_len + 1) < BUFFER_SIZE) {
+        memcpy(bufferSlave + slaveIndex, data, data_len);
+        slaveIndex += data_len;
+        bufferSlave[slaveIndex] = '\n';
+        slaveIndex++;
     }
-  }
-}
-
-void sendCombinedData() {
-    char* paqueteFinal = (char*) malloc(masterIndex + slaveIndex + 1);
-    if (paqueteFinal) {
-      memcpy(paqueteFinal, bufferMaster, masterIndex);
-      memcpy(paqueteFinal + masterIndex, bufferSlave, slaveIndex);
-      paqueteFinal[masterIndex + slaveIndex] = '\0';
-
-      sendDataInChunks(pAnguloTotal, paqueteFinal, masterIndex + slaveIndex);
-      free(paqueteFinal);
-
-      delay(100);
-      pAnguloTotal->setValue((uint8_t*)"END", 3);
-      pAnguloTotal->notify();
-      Serial.println("⏹ [MASTER] Datos completos enviados a BLE");
-    } else {
-      Serial.println("❌ Error allocating memory for final packet");
-    }
-    masterIndex = 0;
-    slaveIndex = 0;
-    bufferMaster[0] = '\0';
-    bufferSlave[0] = '\0';
-    slaveDone = false;
 }
 
 void setup() {
-  Serial.begin(115200);
-  Wire.begin();
-  mpu6050.begin();
-  mpu6050.calcGyroOffsets();
+    Serial.begin(115200);
+    Wire.begin();
+    mpu6050.begin();
+    mpu6050.calcGyroOffsets();
 
-  WiFi.mode(WIFI_STA);
-  if (esp_now_init() != ESP_OK) {
-    Serial.println("❌ Error inicializando ESP-NOW");
-    return;
-  }
-  esp_now_register_recv_cb(OnDataRecv);
+    // --- ESP-NOW ---
+    WiFi.mode(WIFI_STA);
+    if (esp_now_init() != ESP_OK) {
+        Serial.println("❌ Error inicializando ESP-NOW");
+        return;
+    }
+    esp_now_register_recv_cb(OnDataRecv);
 
-  esp_now_peer_info_t peerInfo = {};
-  memcpy(peerInfo.peer_addr, slaveAddress, 6);
-  peerInfo.channel = 1;
-  peerInfo.encrypt = false;
-  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-    Serial.println("❌ Error añadiendo peer");
-    return;
-  }
+    esp_now_peer_info_t peerInfo = {};
+    memcpy(peerInfo.peer_addr, slaveAddress, 6);
+    peerInfo.channel = 1;
+    peerInfo.encrypt = false;
 
-  BLEDevice::init("ESP32_MASTER");
-  pServer = BLEDevice::createServer();
-  BLEService *pService = pServer->createService(SERVICE_UUID);
-  pAnguloTotal = pService->createCharacteristic(ANGLE_UUID, BLECharacteristic::PROPERTY_NOTIFY);
-  pAnguloTotal->addDescriptor(new BLE2902());
-  pComando = pService->createCharacteristic(CMD_UUID, BLECharacteristic::PROPERTY_WRITE);
-  pComando->setCallbacks(new CmdCallbacks());
-  pService->start();
-  pServer->getAdvertising()->start();
+    if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+        Serial.println("❌ Error añadiendo peer");
+        return;
+    }
 
-  Serial.println("✅ MASTER listo. Esperando comandos BLE...");
-  tiempoPrevio = millis();
+    // --- BLE ---
+    BLEDevice::init("ESP32_MASTER");
+    pServer = BLEDevice::createServer();
+
+    BLEService *pService = pServer->createService(SERVICE_UUID);
+    pAnguloTotal = pService->createCharacteristic(ANGLE_UUID, BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ);
+    pAnguloTotal->addDescriptor(new BLE2902());
+
+    pComando = pService->createCharacteristic(CMD_UUID, BLECharacteristic::PROPERTY_WRITE);
+    pComando->setCallbacks(new CmdCallbacks());
+
+    pService->start();
+    pServer->getAdvertising()->start();
+
+    Serial.println("✅ MASTER listo. Esperando comandos BLE...");
+    tiempoPrevio = millis();
 }
 
 void loop() {
-  // Handle PING timeout
-  if (pingSentTime > 0 && !pongReceived && (millis() - pingSentTime > 2000)) {
-    Serial.println("❌ [MASTER] PING timeout. SLAVE no encontrado.");
-    pAnguloTotal->setValue((uint8_t*)"SLAVE_ERROR", 11);
-    pAnguloTotal->notify();
-    pingSentTime = 0; // Reset ping state
-  }
-  
-  // Handle PONG received
-  if (pongReceived) {
-    pAnguloTotal->setValue((uint8_t*)"SLAVE_OK", 8);
-    pAnguloTotal->notify();
-    pongReceived = false; // Reset
-    pingSentTime = 0;
-  }
+    if (midiendo) {
+        obtenerAnguloTotal();
 
-  if (midiendo) {
-    obtenerAnguloTotal();
-    StaticJsonDocument<100> doc;
-    doc["id"] = "MASTER";
-    doc["idx"] = idx;
-    doc["time"] = millis() - tiempoInicio;
-    doc["angle"] = anguloTotal;
-    char buffer[100];
-    serializeJson(doc, buffer);
-    if ((masterIndex + strlen(buffer) + 2) < BUFFER_SIZE) {
-      int n = snprintf(bufferMaster + masterIndex, BUFFER_SIZE - masterIndex, "%s\n", buffer);
-      if (n > 0) masterIndex += n;
+        StaticJsonDocument<100> doc;
+        doc["id"] = "MASTER";
+        doc["idx"] = idx;
+        doc["time"] = millis() - tiempoInicio;
+        doc["angle"] = anguloTotal;
+
+        char buffer[100];
+        serializeJson(doc, buffer);
+
+        if ((masterIndex + strlen(buffer) + 2) < BUFFER_SIZE) {
+            int n = snprintf(bufferMaster + masterIndex, BUFFER_SIZE - masterIndex, "%s\n", buffer);
+            if (n > 0) masterIndex += n;
+        }
+
+        idx++;
+        delay(20);
     }
-    idx++;
-    delay(20);
-  }
 }
 
 void obtenerAnguloTotal() {
-  mpu6050.update();
-  float accX = mpu6050.getAccX();
-  float accY = mpu6050.getAccY();
-  float accZ = mpu6050.getAccZ();
-  float angAccX = atan2(accY, accZ) * 180 / PI;
-  float angAccY = atan2(-accX, sqrt(accY * accY + accZ * accZ)) * 180 / PI;
-  float gyroX = mpu6050.getGyroX();
-  float gyroY = mpu6050.getGyroY();
-  float gyroZ = mpu6050.getGyroZ();
-  float dt = (millis() - tiempoPrevio) / 1000.0;
-  tiempoPrevio = millis();
-  anguloX += gyroX * dt;
-  anguloY += gyroY * dt;
-  anguloZ += gyroZ * dt;
-  float angleX_Final = alpha * anguloX + (1 - alpha) * angAccX;
-  float angleY_Final = alpha * anguloY + (1 - alpha) * angAccY;
-  float angleZ_Final = anguloZ;
-  anguloTotal = sqrt(angleX_Final * angleX_Final + angleY_Final * angleY_Final + angleZ_Final * angleZ_Final) / sqrt(3);
+    mpu6050.update();
+    float accX = mpu6050.getAccX();
+    float accY = mpu6050.getAccY();
+    float accZ = mpu6050.getAccZ();
+
+    float angAccX = atan2(accY, accZ) * 180 / PI;
+    float angAccY = atan2(-accX, sqrt(accY * accY + accZ * accZ)) * 180 / PI;
+
+    float gyroX = mpu6050.getGyroX();
+    float gyroY = mpu6050.getGyroY();
+    float gyroZ = mpu6050.getGyroZ();
+
+    float dt = (millis() - tiempoPrevio) / 1000.0;
+    tiempoPrevio = millis();
+
+    anguloX += gyroX * dt;
+    anguloY += gyroY * dt;
+    anguloZ += gyroZ * dt;
+
+    float angleX_Final = alpha * anguloX + (1 - alpha) * angAccX;
+    float angleY_Final = alpha * anguloY + (1 - alpha) * angAccY;
+    float angleZ_Final = anguloZ;
+
+    anguloTotal = sqrt(angleX_Final * angleX_Final + angleY_Final * angleY_Final + angleZ_Final * angleZ_Final) / sqrt(3);
 }
 
 void recalibrarMPU() {
-  Serial.println("⚙️ Calibrando Master...");
-  mpu6050.calcGyroOffsets();
-}
-
-void sendDataInChunks(BLECharacteristic* pChar, const char* data, int length) {
-  int mtu = 20;
-  int offset = 0;
-  while (offset < length) {
-    int chunkSize = length - offset;
-    if (chunkSize > mtu) {
-      chunkSize = mtu;
-    }
-    pChar->setValue((uint8_t*)(data + offset), chunkSize);
-    pChar->notify();
-    offset += chunkSize;
-  }
+    Serial.println("⚙️ Calibrando Master...");
+    mpu6050.calcGyroOffsets();
 }
