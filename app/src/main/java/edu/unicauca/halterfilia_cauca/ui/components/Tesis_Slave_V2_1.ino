@@ -54,10 +54,6 @@ void OnDataRecv(const esp_now_recv_info *info, const uint8_t *data, int data_len
       recalibrarMPU();
       Serial.println("⚙️ [SLAVE] Calibración completada.");
     }
-    else if (memcmp(data, "PING", 4) == 0) {
-      Serial.println("PING recibido. Enviando PONG.");
-      esp_now_send(masterAddress, (uint8_t*)"PONG", 4);
-    }
   }
 }
 

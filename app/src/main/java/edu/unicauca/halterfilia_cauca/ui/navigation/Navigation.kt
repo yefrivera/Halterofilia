@@ -17,7 +17,10 @@ import edu.unicauca.halterfilia_cauca.ui.features.bluetooth_connection.Bluetooth
 import edu.unicauca.halterfilia_cauca.ui.features.bluetooth_connection.BluetoothViewModelFactory
 import edu.unicauca.halterfilia_cauca.ui.features.history.HistoryScreen
 import edu.unicauca.halterfilia_cauca.ui.features.login.LoginScreen
+import edu.unicauca.halterfilia_cauca.data.MeasurementRepository
 import edu.unicauca.halterfilia_cauca.ui.features.measurement.MedidasScreen
+import edu.unicauca.halterfilia_cauca.ui.features.measurement.MedidasViewModel
+import edu.unicauca.halterfilia_cauca.ui.features.measurement.MedidasViewModelFactory
 import edu.unicauca.halterfilia_cauca.ui.features.register.RegisterScreen
 
 @Composable
@@ -55,24 +58,44 @@ fun Navigation() {
                 bluetoothViewModel = bluetoothViewModel
             )
         }
-        composable(route = AppScreens.HistoryScreen.route){
-            HistoryScreen(navController = navController)
-        }
         composable(
-            route = AppScreens.MedidasScreen.route + "/{athleteName}/{athleteId}",
+            route = AppScreens.HistoryScreen.route + "/{athleteName}/{athleteDocId}",
             arguments = listOf(
                 navArgument("athleteName") { type = NavType.StringType },
+                navArgument("athleteDocId") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val athleteName = backStackEntry.arguments?.getString("athleteName") ?: ""
+            val athleteDocId = backStackEntry.arguments?.getString("athleteDocId") ?: ""
+            HistoryScreen(
+                navController = navController,
+                athleteName = athleteName,
+                athleteDocId = athleteDocId
+            )
+        }
+        composable(
+            route = AppScreens.MedidasScreen.route + "?athleteName={athleteName}&athleteId={athleteId}",
+            arguments = listOf(
+                navArgument("athleteName") { type = NavType.StringType; nullable = true },
                 navArgument("athleteId") { type = NavType.StringType; nullable = true }
             )
         ) { backStackEntry ->
             val athleteName = backStackEntry.arguments?.getString("athleteName") ?: "Deportista"
-            val athleteId = backStackEntry.arguments?.getString("athleteId") ?: ""
-            MedidasScreen(
-                navController = navController,
-                athleteName = athleteName,
-                athleteDocId = athleteId,
-                bluetoothController = bluetoothViewModel.bluetoothController
-            )
+            val athleteId = backStackEntry.arguments?.getString("athleteId")
+            if (athleteId != null) {
+                val medidasViewModel: MedidasViewModel = viewModel(
+                    factory = MedidasViewModelFactory(
+                        bluetoothController = bluetoothViewModel.bluetoothController,
+                        measurementRepository = MeasurementRepository(),
+                        athleteId = athleteId
+                    )
+                )
+                MedidasScreen(
+                    navController = navController,
+                    athleteName = athleteName,
+                    medidasViewModel = medidasViewModel
+                )
+            }
         }
     }
 }

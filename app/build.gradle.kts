@@ -90,7 +90,8 @@ dependencies {
     implementation ("com.google.firebase:firebase-firestore:24.11.1")
     implementation ("com.google.firebase:firebase-firestore-ktx:24.11.1")
 
-
-
+    // MPAndroidChart for charts
+    implementation ("com.github.PhilJay:MPAndroidChart:v3.1.0")
 
 }
+

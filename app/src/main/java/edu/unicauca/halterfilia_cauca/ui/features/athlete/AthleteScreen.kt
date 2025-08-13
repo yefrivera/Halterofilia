@@ -45,10 +45,13 @@ fun AthleteScreen(
             AthleteMenuAction.MEASURE -> {
                 val athleteId = athlete.id ?: ""
                 navController.navigate(
-                    AppScreens.MedidasScreen.route + "/${athlete.name}/$athleteId"
+                    AppScreens.MedidasScreen.route + "?athleteName=${athlete.name}&athleteId=$athleteId"
                 )
             }
-            AthleteMenuAction.HISTORY -> navController.navigate(AppScreens.HistoryScreen.route)
+            AthleteMenuAction.HISTORY -> {
+                val athleteId = athlete.id ?: ""
+                navController.navigate(AppScreens.HistoryScreen.route + "/${athlete.name}/$athleteId")
+            }
             AthleteMenuAction.DELETE -> athleteViewModel.onDeleteAthleteClicked(athlete)
         }
     }

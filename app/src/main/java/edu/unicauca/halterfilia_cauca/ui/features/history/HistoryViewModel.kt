@@ -1,83 +1,97 @@
 package edu.unicauca.halterfilia_cauca.ui.features.history
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import android.util.Log
 import androidx.lifecycle.ViewModel
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
+import androidx.lifecycle.viewModelScope
+import com.google.firebase.auth.FirebaseAuth
+import edu.unicauca.halterfilia_cauca.data.MeasurementRepository
+import edu.unicauca.halterfilia_cauca.domain.model.MeasurementSession
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import java.util.Calendar
+import java.util.Date
 
-// 1. Modelo de datos para un item del historial
-data class RepetitionHistoryItem(
-    val id: Int,
-    val name: String
+data class HistoryState(
+    val sessions: List<MeasurementSession> = emptyList(),
+    val filteredSessions: List<MeasurementSession> = emptyList(),
+    val isLoading: Boolean = true,
+    val error: String? = null,
+    val filterDate: Date? = null
 )
 
-// 2. ViewModel para la pantalla de historial
-class HistoryViewModel : ViewModel() {
+class HistoryViewModel(
+    private val repository: MeasurementRepository,
+    private val athleteId: String
+) : ViewModel() {
 
-    // --- ESTADOS DE LA UI ---
-    var selectedDate by mutableStateOf(LocalDate.now()) // Fecha seleccionada, inicia en hoy
-        private set
+    private val _state = MutableStateFlow(HistoryState())
+    val state: StateFlow<HistoryState> = _state.asStateFlow()
 
-    var repetitionsForDate by mutableStateOf(listOf<RepetitionHistoryItem>())
-        private set
-
-    var isLoading by mutableStateOf(false) // Para mostrar un indicador de carga
-        private set
-
-    var showCalendar by mutableStateOf(false) // Para mostrar/ocultar el calendario
-        private set
-
-    // --- BASE DE DATOS FALSA (PARA EJEMPLO) ---
-    // En una app real, esto sería una consulta a tu base de datos (Room, Firebase, etc.)
-    private val fakeDatabase = mapOf(
-        LocalDate.now() to listOf(
-            RepetitionHistoryItem(1, "Repetición 1"),
-            RepetitionHistoryItem(2, "Repetición 2"),
-            RepetitionHistoryItem(3, "Repetición 3")
-        ),
-        LocalDate.now().minusDays(1) to listOf(
-            RepetitionHistoryItem(4, "Repetición A"),
-            RepetitionHistoryItem(5, "Repetición B")
-        ),
-        LocalDate.now().minusDays(2) to emptyList() // Un día sin datos
-    )
+    private val userId: String? = FirebaseAuth.getInstance().currentUser?.uid
 
     init {
-        // Carga los datos para la fecha actual al iniciar
-        fetchRepetitionsForDate(selectedDate)
+        loadSessions()
     }
 
-    // --- ACCIONES DEL USUARIO ---
-    fun onDateSelected(dateInMillis: Long?) {
-        dateInMillis?.let {
-            val newDate = Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate()
-            selectedDate = newDate
-            fetchRepetitionsForDate(newDate)
+    private fun loadSessions() {
+        if (userId == null) {
+            _state.value = HistoryState(isLoading = false, error = "Usuario no autenticado.")
+            return
         }
-        showCalendar = false
+
+        viewModelScope.launch {
+            _state.value = HistoryState(isLoading = true)
+            val result = repository.getMeasurementSessions(userId, athleteId)
+            if (result.isSuccess) {
+                val sessions = result.getOrNull()?.sortedBy { it.timestamp } ?: emptyList()
+                _state.value = HistoryState(isLoading = false, sessions = sessions, filteredSessions = sessions)
+            } else {
+                _state.value = HistoryState(isLoading = false, error = "Error al cargar las mediciones.")
+            }
+        }
     }
 
-    fun onShowCalendar() {
-        showCalendar = true
+    fun filterSessionsByDate(date: Date) {
+        val calendar = Calendar.getInstance()
+        calendar.time = date
+        val year = calendar.get(Calendar.YEAR)
+        val month = calendar.get(Calendar.MONTH)
+        val day = calendar.get(Calendar.DAY_OF_MONTH)
+
+        val filtered = _state.value.sessions.filter { session ->
+            session.timestamp?.let {
+                val sessionCalendar = Calendar.getInstance()
+                sessionCalendar.time = it
+                val sessionYear = sessionCalendar.get(Calendar.YEAR)
+                val sessionMonth = sessionCalendar.get(Calendar.MONTH)
+                val sessionDay = sessionCalendar.get(Calendar.DAY_OF_MONTH)
+                sessionYear == year && sessionMonth == month && sessionDay == day
+            } ?: false
+        }
+        _state.value = _state.value.copy(filteredSessions = filtered, filterDate = date)
     }
 
-    fun onDismissCalendar() {
-        showCalendar = false
+    fun clearFilter() {
+        _state.value = _state.value.copy(filteredSessions = _state.value.sessions, filterDate = null)
     }
 
-    private fun fetchRepetitionsForDate(date: LocalDate) {
-        isLoading = true
-        // Simulación de la llamada a la base de datos
-        val results = fakeDatabase[date] ?: emptyList()
-        repetitionsForDate = results
-        isLoading = false
-    }
+    fun deleteSession(measurementId: String) {
+        if (userId == null) {
+            Log.e("HistoryViewModel", "No se puede eliminar, el usuario no está logueado.")
+            return
+        }
 
-    fun onRepetitionClicked(item: RepetitionHistoryItem) {
-        // TODO: Aquí irá la lógica para navegar a la pantalla de detalles de esta repetición
-        println("Clicked on: ${item.name}")
+        viewModelScope.launch {
+            val result = repository.deleteMeasurementSession(userId, athleteId, measurementId)
+            if (result.isSuccess) {
+                // Recarga la lista de sesiones después de eliminar
+                loadSessions()
+            } else {
+                // Opcional: manejar el estado de error en la UI
+                Log.e("HistoryViewModel", "Error al eliminar la sesión")
+            }
+        }
     }
 }
