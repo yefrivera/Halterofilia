@@ -12,12 +12,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import edu.unicauca.halterfilia_cauca.ui.navigation.AppScreens
 import kotlinx.coroutines.launch
 
 @Composable
 fun MedidasScreen(
     navController: NavController,
     athleteName: String,
+    athleteId: String,
     medidasViewModel: MedidasViewModel
 ) {
     val state by medidasViewModel.state.collectAsState()
@@ -28,7 +30,10 @@ fun MedidasScreen(
         onStartClicked = { medidasViewModel.startMeasurement() },
         onStopClicked = { medidasViewModel.stopMeasurement() },
         onNavigateBack = { navController.popBackStack() },
-        resetSaveStatus = { medidasViewModel.resetSaveStatus() }
+        resetSaveStatus = { medidasViewModel.resetSaveStatus() },
+        onHistoryClicked = {
+            navController.navigate(AppScreens.HistoryScreen.route + "/$athleteName/$athleteId")
+        }
     )
 }
 
@@ -40,7 +45,8 @@ fun MedidasContent(
     onStartClicked: () -> Unit,
     onStopClicked: () -> Unit,
     onNavigateBack: () -> Unit,
-    resetSaveStatus: () -> Unit
+    resetSaveStatus: () -> Unit,
+    onHistoryClicked: () -> Unit
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -93,11 +99,15 @@ fun MedidasContent(
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            if (state.isMeasuring || state.saveStatus == SaveStatus.SAVING) {
+            if (state.isMeasuring || state.isStopping || state.saveStatus == SaveStatus.SAVING) {
                 CircularProgressIndicator(modifier = Modifier.size(64.dp))
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = if (state.isMeasuring) "Midiendo..." else "Guardando...",
+                    text = when {
+                        state.isStopping -> "Deteniendo..."
+                        state.isMeasuring -> "Midiendo..."
+                        else -> "Guardando..."
+                    },
                     style = MaterialTheme.typography.headlineSmall
                 )
             } else {
@@ -123,7 +133,7 @@ fun MedidasContent(
 
                 Button(
                     onClick = onStopClicked,
-                    enabled = state.isMeasuring,
+                    enabled = state.isMeasuring && !state.isStopping,
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color.Red
@@ -131,6 +141,14 @@ fun MedidasContent(
                 ) {
                     Text("Parar Medición")
                 }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick = onHistoryClicked,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Historial")
             }
         }
     }

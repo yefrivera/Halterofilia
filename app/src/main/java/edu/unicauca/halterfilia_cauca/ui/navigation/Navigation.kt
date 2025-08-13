@@ -93,6 +93,7 @@ fun Navigation() {
                 MedidasScreen(
                     navController = navController,
                     athleteName = athleteName,
+                    athleteId = athleteId,
                     medidasViewModel = medidasViewModel
                 )
             }

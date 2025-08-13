@@ -180,7 +180,9 @@ fun AthleteRegistrationContent(
                     onClick = {
                         val selectedDate = datePickerState.selectedDateMillis
                         if (selectedDate != null) {
-                            val formattedDate = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(selectedDate))
+                            val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                            sdf.timeZone = TimeZone.getTimeZone("UTC")
+                            val formattedDate = sdf.format(Date(selectedDate))
                             onBirthDateChange(formattedDate)
                         }
                         showDatePicker = false
