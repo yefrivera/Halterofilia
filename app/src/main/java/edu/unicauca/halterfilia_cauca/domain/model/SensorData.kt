@@ -9,5 +9,6 @@ data class SensorData(
     val gz_slave: Float = 0f,
     val roll_master: Float = 0f,
     val pitch_master: Float = 0f,
+    val time: Long = 0L,
     val error: String? = null
 )

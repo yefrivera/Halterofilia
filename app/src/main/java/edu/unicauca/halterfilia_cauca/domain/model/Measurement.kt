@@ -14,7 +14,6 @@ data class MeasurementSession(
     val userId: String = "", // ID del usuario que realiza la medición
     val athleteId: String = "",
     val userEmail: String = "", // Email del usuario que realiza la medición
-    @ServerTimestamp
     val timestamp: Date? = null, // Firestore asignará la fecha del servidor
     val dataPoints: List<DataPoint> = emptyList() // Lista de todos los puntos de datos de la sesión
 )

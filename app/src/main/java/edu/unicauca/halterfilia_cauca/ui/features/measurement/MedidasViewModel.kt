@@ -17,18 +17,15 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONException
+import java.util.Date
 
 // Clase de datos interna que representa la estructura del JSON recibido.
 // Esto evita conflictos con la clase DataPoint oficial del proyecto.
 data class IncomingDataPoint(
     val id: String = "",
-    val accX: Double = 0.0,
-    val accY: Double = 0.0,
-    val accZ: Double = 0.0,
-    val gyroX: Double = 0.0,
-    val gyroY: Double = 0.0,
-    val gyroZ: Double = 0.0,
-    val angle: Double = 0.0
+    val idx: Int = 0,
+    val angle: Double = 0.0,
+    val time: Long = 0L
 )
 
 enum class SaveStatus {
@@ -41,6 +38,7 @@ enum class SaveStatus {
 data class MeasurementState(
     val isConnected: Boolean = false,
     val isMeasuring: Boolean = false,
+    val isStopping: Boolean = false,
     val saveStatus: SaveStatus = SaveStatus.IDLE
 )
 
@@ -66,7 +64,7 @@ class MedidasViewModel(
 
         bluetoothController.bleData
             .onEach { data ->
-                if (data is BLEData.MeasurementData) {
+                if (data is BLEData.MeasurementData && _state.value.isMeasuring) {
                     processIncomingData(data.payload)
                 }
             }
@@ -78,17 +76,21 @@ class MedidasViewModel(
             val connectedDeviceAddress = bluetoothController.connectedDevices.value.keys.firstOrNull()
             if (connectedDeviceAddress != null) {
                 incomingDataPoints.clear()
-                _state.value = _state.value.copy(isMeasuring = true, saveStatus = SaveStatus.IDLE)
+                _state.value = _state.value.copy(
+                    isMeasuring = true,
+                    saveStatus = SaveStatus.IDLE,
+                    isStopping = false
+                )
                 bluetoothController.sendData(connectedDeviceAddress, "START")
             }
         }
     }
 
     fun stopMeasurement() {
-        if (_state.value.isConnected) {
+        if (_state.value.isConnected && !_state.value.isStopping) {
             val connectedDeviceAddress = bluetoothController.connectedDevices.value.keys.firstOrNull()
             if (connectedDeviceAddress != null) {
-                _state.value = _state.value.copy(isMeasuring = false)
+                _state.value = _state.value.copy(isStopping = true)
                 bluetoothController.sendData(connectedDeviceAddress, "STOP")
             }
         }
@@ -104,13 +106,9 @@ class MedidasViewModel(
                 val json = jsonArray.getJSONObject(i)
                 val dataPoint = IncomingDataPoint(
                     id = json.optString("id", ""),
-                    accX = json.optDouble("accX", 0.0),
-                    accY = json.optDouble("accY", 0.0),
-                    accZ = json.optDouble("accZ", 0.0),
-                    gyroX = json.optDouble("gyroX", 0.0),
-                    gyroY = json.optDouble("gyroY", 0.0),
-                    gyroZ = json.optDouble("gyroZ", 0.0),
-                    angle = json.optDouble("angle", 0.0)
+                    idx = json.optInt("idx", 0),
+                    angle = json.optDouble("angle", 0.0),
+                    time = json.optLong("time", 0L)
                 )
                 incomingDataPoints.add(dataPoint)
             }
@@ -132,11 +130,11 @@ class MedidasViewModel(
         _state.value = _state.value.copy(saveStatus = SaveStatus.SAVING)
 
         // Mapea la lista de datos recibidos a la lista del modelo oficial DataPoint
-        val officialDataPoints = incomingDataPoints.mapIndexed { index, incoming ->
+        val officialDataPoints = incomingDataPoints.map { incoming ->
             DataPoint(
                 id = if (incoming.id.equals("MASTER", ignoreCase = true)) 0 else 1,
-                idx = index,
-                timeMs = 0L, // El JSON no provee timestamp por punto, se podría añadir si fuera necesario
+                idx = incoming.idx,
+                time = incoming.time,
                 angle = incoming.angle.toFloat(),
                 source = incoming.id
             )
@@ -151,6 +149,7 @@ class MedidasViewModel(
                 userId = userId,
                 athleteId = athleteId,
                 userEmail = userEmail,
+                timestamp = Date(),
                 dataPoints = officialDataPoints
             )
 
@@ -158,14 +157,23 @@ class MedidasViewModel(
             val result = measurementRepository.saveMeasurementSession(session)
 
             if (result.isSuccess) {
-                _state.value = _state.value.copy(saveStatus = SaveStatus.SUCCESS)
+                _state.value = _state.value.copy(
+                    saveStatus = SaveStatus.SUCCESS,
+                    isMeasuring = false,
+                    isStopping = false
+                )
                 Log.i("MedidasViewModel", "Sesión guardada correctamente.")
             } else {
-                _state.value = _state.value.copy(saveStatus = SaveStatus.ERROR)
+                _state.value = _state.value.copy(
+                    saveStatus = SaveStatus.ERROR,
+                    isMeasuring = false,
+                    isStopping = false
+                )
                 Log.e("MedidasViewModel", "Error al guardar la sesión", result.exceptionOrNull())
             }
         }
     }
+
 
     fun resetSaveStatus() {
         _state.value = _state.value.copy(saveStatus = SaveStatus.IDLE)

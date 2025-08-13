@@ -1,6 +1,7 @@
 package edu.unicauca.halterfilia_cauca.ui.features.history
 
 import android.app.DatePickerDialog
+import android.content.res.Configuration
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -12,19 +13,22 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.viewinterop.AndroidView
+import android.view.MotionEvent
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.github.mikephil.charting.charts.LineChart
 import com.github.mikephil.charting.data.Entry
 import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
-import edu.unicauca.halterfilia_cauca.R // Asegúrate de importar tu R
+import com.github.mikephil.charting.listener.ChartTouchListener
+import com.github.mikephil.charting.listener.OnChartGestureListener
 import edu.unicauca.halterfilia_cauca.data.MeasurementRepository
 import edu.unicauca.halterfilia_cauca.domain.model.MeasurementSession
 import java.text.SimpleDateFormat
@@ -256,13 +260,21 @@ fun DeleteConfirmationDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChartModal(session: MeasurementSession, onDismissRequest: () -> Unit) {
-    Dialog(onDismissRequest = onDismissRequest) {
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Card(
             modifier = Modifier
-                .fillMaxWidth(0.95f)
-                .fillMaxHeight(0.85f)
+                .fillMaxSize()
+                .padding(
+                    horizontal = if (isLandscape) 32.dp else 16.dp,
+                    vertical = if (isLandscape) 16.dp else 32.dp
+                )
         ) {
-            // Usar un Scaffold interno para tener TopBar y BottomBar
             Scaffold(
                 topBar = {
                     TopAppBar(
@@ -271,7 +283,9 @@ fun ChartModal(session: MeasurementSession, onDismissRequest: () -> Unit) {
                 },
                 bottomBar = {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
                         horizontalArrangement = Arrangement.End
                     ) {
                         Button(onClick = onDismissRequest) {
@@ -287,22 +301,70 @@ fun ChartModal(session: MeasurementSession, onDismissRequest: () -> Unit) {
                             isDragEnabled = true
                             setScaleEnabled(true)
                             setPinchZoom(true)
-                            // Personalizaciones adicionales del gráfico aquí
+
+                            // Listener para controlar la visibilidad de los valores al hacer zoom
+                            onChartGestureListener = object : OnChartGestureListener {
+                                override fun onChartGestureStart(me: MotionEvent?, lastPerformedGesture: ChartTouchListener.ChartGesture?) {}
+                                override fun onChartGestureEnd(me: MotionEvent?, lastPerformedGesture: ChartTouchListener.ChartGesture?) {}
+                                override fun onChartLongPressed(me: MotionEvent?) {}
+                                override fun onChartDoubleTapped(me: MotionEvent?) {}
+                                override fun onChartSingleTapped(me: MotionEvent?) {}
+                                override fun onChartFling(me1: MotionEvent?, me2: MotionEvent?, velocityX: Float, velocityY: Float) {}
+                                override fun onChartTranslate(me: MotionEvent?, dX: Float, dY: Float) {}
+
+                                override fun onChartScale(me: MotionEvent?, scaleX: Float, scaleY: Float) {
+                                    this@apply.data?.let { lineData ->
+                                        val dataSet = lineData.getDataSetByIndex(0) as LineDataSet
+                                        // Muestra los valores solo si el zoom en X es mayor a 1.5f
+                                        dataSet.setDrawValues(this@apply.viewPortHandler.scaleX > 1.5f)
+                                        invalidate()
+                                    }
+                                }
+                            }
                         }
                     },
                     update = { chart ->
-                        val entries = session.dataPoints.map {
-                            Entry(it.timeMs.toFloat(), it.angle)
+                        // 1. Separar datos por fuente (MASTER y SLAVE)
+                        val dataBySource = session.dataPoints.groupBy { it.source }
+                        val masterData = dataBySource["MASTER"]?.associateBy { it.idx } ?: emptyMap()
+                        val slaveData = dataBySource["SLAVE"]?.associateBy { it.idx } ?: emptyMap()
+
+                        // 2. Determinar el rango de idx
+                        val maxMasterIdx = masterData.keys.maxOrNull() ?: -1
+                        val maxSlaveIdx = slaveData.keys.maxOrNull() ?: -1
+                        val maxIdx = maxOf(maxMasterIdx, maxSlaveIdx)
+
+                        // 3. Calcular la diferencia absoluta y crear las entradas para el gráfico
+                        val entries = mutableListOf<Entry>()
+                        if (maxIdx != -1) {
+                            for (i in 0..maxIdx) {
+                                val masterPoint = masterData[i]
+                                val slavePoint = slaveData[i]
+
+                                val masterAngle = masterPoint?.angle ?: 0f
+                                val slaveAngle = slavePoint?.angle ?: 0f
+
+                                val calculatedAngle = kotlin.math.abs(masterAngle - slaveAngle)
+
+                                // Usar el tiempo del MASTER como referencia, o del SLAVE si no existe
+                                val time = (masterPoint?.time ?: slavePoint?.time ?: 0L).toFloat()
+
+                                entries.add(Entry(time, calculatedAngle))
+                            }
                         }
-                        val dataSet = LineDataSet(entries, "Ángulo")
+
+                        val dataSet = LineDataSet(entries, "Ángulo (°) vs Tiempo (ms)")
+
+                        // Ocultar los valores inicialmente, comprobando el nivel de zoom actual
+                        dataSet.setDrawValues(chart.viewPortHandler.scaleX > 1.5f)
+
                         val lineData = LineData(dataSet)
                         chart.data = lineData
-                        chart.invalidate() // Refresca el gráfico
+                        chart.invalidate()
                     },
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(paddingValues)
-                        .padding(16.dp) // Añade padding al contenido del gráfico
                 )
             }
         }
