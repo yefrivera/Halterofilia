@@ -9,9 +9,9 @@
               <option name="connection">
                 <ConnectionSetting>
                   <option name="appId" value="edu.unicauca.halterfilia_cauca" />
-                  <option name="mobileSdkAppId" value="1:1062469759263:android:b66fa7ce22e06060a7002a" />
-                  <option name="projectId" value="halterofilia-cauca" />
-                  <option name="projectNumber" value="1062469759263" />
+                  <option name="mobileSdkAppId" value="1:1022114424782:android:5bd5d1ce93ac550d99ad9f" />
+                  <option name="projectId" value="halterofilia-cauca-fb77e" />
+                  <option name="projectNumber" value="1022114424782" />
                 </ConnectionSetting>
               </option>
               <option name="signal" value="SIGNAL_UNSPECIFIED" />

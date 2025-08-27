@@ -15,10 +15,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
-import org.json.JSONArray
+import kotlinx.coroutines.delay
+import org.json.JSONObject
 import org.json.JSONException
 import java.util.Date
-
 // Clase de datos interna que representa la estructura del JSON recibido.
 // Esto evita conflictos con la clase DataPoint oficial del proyecto.
 data class IncomingDataPoint(
@@ -87,43 +87,78 @@ class MedidasViewModel(
     }
 
     fun stopMeasurement() {
-        if (_state.value.isConnected && !_state.value.isStopping) {
+        if (_state.value.isConnected && _state.value.isMeasuring && !_state.value.isStopping) {
             val connectedDeviceAddress = bluetoothController.connectedDevices.value.keys.firstOrNull()
             if (connectedDeviceAddress != null) {
                 _state.value = _state.value.copy(isStopping = true)
                 bluetoothController.sendData(connectedDeviceAddress, "STOP")
+
+                // Launch a coroutine to save after a delay.
+                // This allows any in-flight data to be processed before saving.
+                viewModelScope.launch {
+                    delay(1000) // 1-second delay
+                    saveSession()
+                }
             }
         }
     }
 
     private fun processIncomingData(data: String) {
-        try {
-            // Transforma la cadena de objetos JSON separados por saltos de línea en un array JSON válido.
-            val jsonArrayString = data.trim().split("\n").filter { it.isNotBlank() }.joinToString(separator = ",", prefix = "[", postfix = "]")
+        var searchIndex = 0
+        var pointsAddedInBatch = 0
 
-            val jsonArray = JSONArray(jsonArrayString)
-            for (i in 0 until jsonArray.length()) {
-                val json = jsonArray.getJSONObject(i)
-                val dataPoint = IncomingDataPoint(
-                    id = json.optString("id", ""),
-                    idx = json.optInt("idx", 0),
-                    angle = json.optDouble("angle", 0.0),
-                    time = json.optLong("time", 0L)
-                )
-                incomingDataPoints.add(dataPoint)
+        while (searchIndex < data.length) {
+            val startIndex = data.indexOf('{', searchIndex)
+            if (startIndex == -1) {
+                break
             }
-            Log.d("MedidasViewModel", "Datos procesados. Total de puntos: ${incomingDataPoints.size}")
-            saveSession()
 
-        } catch (e: JSONException) {
-            Log.e("MedidasViewModel", "Error al parsear JSON: ${e.message}")
-            _state.value = _state.value.copy(saveStatus = SaveStatus.ERROR)
+            var braceCount = 0
+            var endIndex = -1
+            for (i in startIndex until data.length) {
+                when (data[i]) {
+                    '{' -> braceCount++
+                    '}' -> braceCount--
+                }
+                if (braceCount == 0) {
+                    endIndex = i
+                    break
+                }
+            }
+
+            if (endIndex != -1) {
+                val jsonString = data.substring(startIndex, endIndex + 1)
+                try {
+                    val json = JSONObject(jsonString)
+                    val dataPoint = IncomingDataPoint(
+                        id = json.optString("id", ""),
+                        idx = json.optInt("idx", 0),
+                        angle = json.optDouble("angle", 0.0),
+                        time = json.optLong("time", 0L)
+                    )
+                    incomingDataPoints.add(dataPoint)
+                    pointsAddedInBatch++
+                } catch (e: JSONException) {
+                    Log.w("MedidasViewModel", "Ignoring block that is not valid JSON: $jsonString")
+                }
+                searchIndex = endIndex + 1
+            } else {
+                break
+            }
+        }
+        if (pointsAddedInBatch > 0) {
+            Log.d("MedidasViewModel", "Stateless parse: Added $pointsAddedInBatch points. Total: ${incomingDataPoints.size}")
         }
     }
 
     private fun saveSession() {
-        if (incomingDataPoints.isEmpty()) {
-            Log.w("MedidasViewModel", "No hay puntos de datos para guardar.")
+        // Prevent saving if no data or if a save is already in progress.
+        if (incomingDataPoints.isEmpty() || _state.value.saveStatus == SaveStatus.SAVING) {
+            Log.w("MedidasViewModel", "Save attempt ignored: No data or save already in progress.")
+            // If there's no data, we can consider the "stopping" sequence finished.
+            if (incomingDataPoints.isEmpty()) {
+                _state.value = _state.value.copy(isMeasuring = false, isStopping = false)
+            }
             return
         }
 
@@ -153,7 +188,7 @@ class MedidasViewModel(
                 dataPoints = officialDataPoints
             )
 
-            Log.d("MedidasViewModel", "Iniciando el guardado de la sesión.")
+            Log.d("MedidasViewModel", "Saving final session with ${officialDataPoints.size} data points.")
             val result = measurementRepository.saveMeasurementSession(session)
 
             if (result.isSuccess) {
@@ -162,14 +197,14 @@ class MedidasViewModel(
                     isMeasuring = false,
                     isStopping = false
                 )
-                Log.i("MedidasViewModel", "Sesión guardada correctamente.")
+                Log.i("MedidasViewModel", "Session saved successfully.")
             } else {
                 _state.value = _state.value.copy(
                     saveStatus = SaveStatus.ERROR,
                     isMeasuring = false,
                     isStopping = false
                 )
-                Log.e("MedidasViewModel", "Error al guardar la sesión", result.exceptionOrNull())
+                Log.e("MedidasViewModel", "Error saving session", result.exceptionOrNull())
             }
         }
     }
