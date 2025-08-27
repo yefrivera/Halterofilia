@@ -51,6 +51,8 @@ class MedidasViewModel(
     private val _state = MutableStateFlow(MeasurementState())
     val state: StateFlow<MeasurementState> = _state.asStateFlow()
 
+    private val stringBuffer = StringBuilder()
+
     // La lista ahora almacena los objetos de datos que coinciden con el JSON.
     private val incomingDataPoints = mutableListOf<IncomingDataPoint>()
 
@@ -75,7 +77,10 @@ class MedidasViewModel(
         if (_state.value.isConnected) {
             val connectedDeviceAddress = bluetoothController.connectedDevices.value.keys.firstOrNull()
             if (connectedDeviceAddress != null) {
+                // Clear data from the previous session
                 incomingDataPoints.clear()
+                stringBuffer.clear()
+
                 _state.value = _state.value.copy(
                     isMeasuring = true,
                     saveStatus = SaveStatus.IDLE,
@@ -92,62 +97,46 @@ class MedidasViewModel(
             if (connectedDeviceAddress != null) {
                 _state.value = _state.value.copy(isStopping = true)
                 bluetoothController.sendData(connectedDeviceAddress, "STOP")
-
-                // Launch a coroutine to save after a delay.
-                // This allows any in-flight data to be processed before saving.
-                viewModelScope.launch {
-                    delay(1000) // 1-second delay
-                    saveSession()
-                }
             }
         }
     }
 
     private fun processIncomingData(data: String) {
-        var searchIndex = 0
-        var pointsAddedInBatch = 0
+        // Agrega los nuevos datos al búfer
+        stringBuffer.append(data)
 
-        while (searchIndex < data.length) {
-            val startIndex = data.indexOf('{', searchIndex)
-            if (startIndex == -1) {
-                break
+        // Busca si hay mensajes completos (delimitados por salto de línea)
+        var newlineIndex: Int
+        while (stringBuffer.indexOf('\n').also { newlineIndex = it } != -1) {
+            // Extrae el mensaje completo
+            val completeMessage = stringBuffer.substring(0, newlineIndex).trim()
+
+            // Elimina el mensaje procesado del búfer
+            stringBuffer.delete(0, newlineIndex + 1)
+
+            if (completeMessage.isEmpty()) continue
+
+            // Comprueba si es la señal de fin
+            if (completeMessage.equals("END", ignoreCase = true)) {
+                Log.d("MedidasViewModel", "END signal received. Proceeding to save session.")
+                saveSession()
+                break // Salimos del bucle al encontrar END
             }
 
-            var braceCount = 0
-            var endIndex = -1
-            for (i in startIndex until data.length) {
-                when (data[i]) {
-                    '{' -> braceCount++
-                    '}' -> braceCount--
-                }
-                if (braceCount == 0) {
-                    endIndex = i
-                    break
-                }
+            // Intenta procesar el mensaje como JSON
+            try {
+                val json = JSONObject(completeMessage)
+                val dataPoint = IncomingDataPoint(
+                    id = json.optString("id", ""),
+                    idx = json.optInt("idx", 0),
+                    angle = json.optDouble("angle", 0.0),
+                    time = json.optLong("time", 0L)
+                )
+                incomingDataPoints.add(dataPoint)
+                Log.d("MedidasViewModel", "Added point. Total: ${incomingDataPoints.size}")
+            } catch (e: JSONException) {
+                Log.w("MedidasViewModel", "Ignoring block that is not valid JSON: $completeMessage")
             }
-
-            if (endIndex != -1) {
-                val jsonString = data.substring(startIndex, endIndex + 1)
-                try {
-                    val json = JSONObject(jsonString)
-                    val dataPoint = IncomingDataPoint(
-                        id = json.optString("id", ""),
-                        idx = json.optInt("idx", 0),
-                        angle = json.optDouble("angle", 0.0),
-                        time = json.optLong("time", 0L)
-                    )
-                    incomingDataPoints.add(dataPoint)
-                    pointsAddedInBatch++
-                } catch (e: JSONException) {
-                    Log.w("MedidasViewModel", "Ignoring block that is not valid JSON: $jsonString")
-                }
-                searchIndex = endIndex + 1
-            } else {
-                break
-            }
-        }
-        if (pointsAddedInBatch > 0) {
-            Log.d("MedidasViewModel", "Stateless parse: Added $pointsAddedInBatch points. Total: ${incomingDataPoints.size}")
         }
     }
 

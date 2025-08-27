@@ -64,7 +64,7 @@ class BluetoothController(
     val bleData: StateFlow<BLEData?> = _bleData.asStateFlow()
 
     private val gattConnections = mutableMapOf<String, BluetoothGatt>()
-    private val dataBuffer = StringBuilder()
+    
 
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
@@ -162,24 +162,10 @@ class BluetoothController(
     // ✅ **NUEVA FUNCIÓN PARA CENTRALIZAR LA LÓGICA**
     private fun handleReceivedData(value: ByteArray) {
         val receivedString = String(value, Charsets.UTF_8)
-        Log.d("BLE_RECEIVE", "Datos recibidos: '$receivedString'")
-
-        // Comprueba si la cadena recibida contiene el marcador de finalización "END"
-        if (receivedString.contains("END")) {
-            val dataBeforeEnd = receivedString.substringBefore("END")
-            if (dataBeforeEnd.isNotEmpty()) {
-                dataBuffer.append(dataBeforeEnd)
-                Log.i("BLUETOOTH_DEBUG", "Chunk recibido: $dataBeforeEnd. Tamaño del buffer: ${dataBuffer.length}")
-            }
-
-            Log.i("BLUETOOTH_DEBUG", ">>>>>> FIN DE DATOS RECIBIDO <<<<<<")
-            _bleData.value = BLEData.MeasurementData(dataBuffer.toString())
-            dataBuffer.clear() // Reinicia el buffer para el próximo mensaje
-        } else {
-            // Si no hay marcador de finalización, simplemente añade los datos al buffer
-            dataBuffer.append(receivedString)
-            Log.i("BLUETOOTH_DEBUG", "Chunk recibido: $receivedString. Tamaño del buffer: ${dataBuffer.length}")
-        }
+        // Immediately propagate the received data to the ViewModel.
+        // The ViewModel is responsible for buffering and parsing.
+        _bleData.value = BLEData.MeasurementData(payload = receivedString)
+        Log.d("BLUETOOTH_DEBUG", "Data propagated to ViewModel: '$receivedString'")
     }
 
     private fun enableNotifications(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
@@ -211,7 +197,6 @@ class BluetoothController(
         }
 
         if (data == "START" || data == "STOP") {
-            dataBuffer.clear()
             _bleData.value = null
         }
 
